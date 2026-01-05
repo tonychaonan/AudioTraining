@@ -10,6 +10,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Windows.Forms.DataVisualization.Charting;
+using AudioTraining.Services;
 
 namespace AudioTraining
 {
@@ -117,15 +118,44 @@ namespace AudioTraining
 
         private void btnLabelImg_Click(object sender, EventArgs e)
         {
-            // Try to launch labelImg
-            // Assuming it's installed in python environment or standalone
+            if (string.IsNullOrEmpty(_currentImageFolder))
+            {
+                MessageBox.Show("请先加载图片目录！");
+                return;
+            }
+
+            // Try to launch labelme from local Tools folder
             try
             {
-                Process.Start("labelImg", _currentImageFolder ?? "");
+                string toolRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Tools", "LabelImg");
+                // User requested labelme.exe
+                string exePath = Path.Combine(toolRoot, "labelme.exe");
+
+                if (File.Exists(exePath))
+                {
+                    // labelme [dir] --labels [classes_file]
+                    string classesPath = Path.Combine(_currentImageFolder, "classes.txt");
+                    string args = $"\"{_currentImageFolder}\"";
+                    
+                    if (File.Exists(classesPath))
+                    {
+                        args += $" --labels \"{classesPath}\"";
+                    }
+
+                    Process.Start(new ProcessStartInfo(exePath)
+                    {
+                        Arguments = args,
+                        WorkingDirectory = toolRoot
+                    });
+                }
+                else
+                {
+                    MessageBox.Show($"找不到 labelme.exe。\n请确保文件存在于: {exePath}");
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                MessageBox.Show("无法启动 'labelImg'。请确保已安装并添加到系统环境变量PATH中。\n(pip install labelImg)");
+                MessageBox.Show($"无法启动 labelme: {ex.Message}");
             }
         }
 
@@ -145,10 +175,59 @@ namespace AudioTraining
 
         private async void btnStartTrain_Click(object sender, EventArgs e)
         {
-            string yamlPath = txtDataYaml.Text.Trim();
-            if (!File.Exists(yamlPath))
+            if (string.IsNullOrEmpty(_currentImageFolder))
             {
-                MessageBox.Show("找不到 data.yaml 文件。");
+                MessageBox.Show("请先加载图片目录并完成标注！");
+                return;
+            }
+
+            // 1. Auto-Convert LabelMe JSON to YOLO
+            try
+            {
+                string classesFile = Path.Combine(_currentImageFolder, "classes.txt");
+                
+                // Auto-generate classes.txt if missing
+                if (!File.Exists(classesFile))
+                {
+                    AppendConsole("检测到 classes.txt 缺失，正在扫描 JSON 文件自动生成...");
+                    await Task.Run(() => LabelmeConverter.GenerateClassesFile(_currentImageFolder, classesFile));
+                    if (File.Exists(classesFile))
+                    {
+                        AppendConsole($"已自动生成类别文件: {classesFile}");
+                    }
+                    else
+                    {
+                        MessageBox.Show($"无法生成 classes.txt，请检查是否已标注图片。");
+                        return;
+                    }
+                }
+
+                if (File.Exists(classesFile))
+                {
+                    AppendConsole("正在转换 LabelMe JSON 到 YOLO 格式...");
+                    await Task.Run(() => LabelmeConverter.ConvertFolder(_currentImageFolder, classesFile));
+                    AppendConsole("转换完成。");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"转换失败: {ex.Message}");
+                return;
+            }
+
+            // 2. Auto-Generate data.yaml
+            string yamlPath = Path.Combine(_currentImageFolder, "data.yaml");
+            try
+            {
+                AppendConsole("正在生成数据集配置 data.yaml...");
+                GenerateDataYaml(_currentImageFolder, yamlPath);
+                AppendConsole("配置生成完成。");
+                // Update UI to show what's being used (optional)
+                txtDataYaml.Text = yamlPath; 
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"生成配置失败: {ex.Message}");
                 return;
             }
 
@@ -176,6 +255,35 @@ namespace AudioTraining
             _monitorTimer.Start();
 
             await _trainingProcess.StartTrainingAsync(yamlPath, modelSize, epochs, batch, _currentTrainProject);
+        }
+
+        private void GenerateDataYaml(string imageFolder, string outputPath)
+        {
+            string classesPath = Path.Combine(imageFolder, "classes.txt");
+            var lines = File.ReadAllLines(classesPath)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.Trim())
+                .ToList();
+
+            if (lines.Count == 0) throw new Exception("classes.txt 内容为空。");
+
+            var sb = new StringBuilder();
+            // Use forward slashes for YAML compatibility
+            string safePath = imageFolder.Replace("\\", "/");
+
+            sb.AppendLine($"path: {safePath}");
+            sb.AppendLine("train: .");
+            sb.AppendLine("val: .");
+            sb.AppendLine();
+            sb.AppendLine($"nc: {lines.Count}");
+            sb.AppendLine("names:");
+            for (int i = 0; i < lines.Count; i++)
+            {
+                // Quote names to be safe
+                sb.AppendLine($"  {i}: \"{lines[i]}\"");
+            }
+
+            File.WriteAllText(outputPath, sb.ToString());
         }
 
         private void btnStopTrain_Click(object sender, EventArgs e)

@@ -26,6 +26,15 @@ namespace AudioTraining
 
         public async Task StartTrainingAsync(string dataYamlPath, string modelSize, int epochs, int batchSize, string projectPath)
         {
+            string toolRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Tools", "yolo");
+            string yoloPath = Path.Combine(toolRoot, "yolo.exe");
+
+            if (!File.Exists(yoloPath))
+            {
+                OnOutput($"Error: 找不到 yolo.exe，请确认文件是否存在于: {yoloPath}");
+                return;
+            }
+
             string modelName = $"yolov8{modelSize}.pt"; // n, s, m
             
             // Construct command
@@ -33,8 +42,9 @@ namespace AudioTraining
             string args = $"detect train data=\"{dataYamlPath}\" model={modelName} epochs={epochs} batch={batchSize} project=\"{projectPath}\" name=exp exist_ok=True";
 
             _process = new Process();
-            _process.StartInfo.FileName = "yolo"; // Assumes 'yolo' is in system PATH
+            _process.StartInfo.FileName = yoloPath;
             _process.StartInfo.Arguments = args;
+            _process.StartInfo.WorkingDirectory = toolRoot;
             _process.StartInfo.UseShellExecute = false;
             _process.StartInfo.RedirectStandardOutput = true;
             _process.StartInfo.RedirectStandardError = true;
@@ -62,7 +72,6 @@ namespace AudioTraining
             catch (Exception ex)
             {
                 OnOutput($"Error starting training: {ex.Message}");
-                OnOutput("Make sure 'ultralytics' is installed and 'yolo' command is available in PATH.");
             }
         }
 
@@ -70,14 +79,24 @@ namespace AudioTraining
         {
             try
             {
+                string toolRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Tools", "yolo");
+                string yoloPath = Path.Combine(toolRoot, "yolo.exe");
+
+                if (!File.Exists(yoloPath))
+                {
+                    OnOutput($"Error: 找不到 yolo.exe，无法导出模型。");
+                    return;
+                }
+
                 // Best model path: projectPath/exp/weights/best.pt
                 string bestWeights = Path.Combine(projectPath, "exp", "weights", "best.pt");
                 if (File.Exists(bestWeights))
                 {
                     OnOutput("Exporting to ONNX...");
                     var exportProcess = new Process();
-                    exportProcess.StartInfo.FileName = "yolo";
+                    exportProcess.StartInfo.FileName = yoloPath;
                     exportProcess.StartInfo.Arguments = $"export model=\"{bestWeights}\" format=onnx";
+                    exportProcess.StartInfo.WorkingDirectory = toolRoot;
                     exportProcess.StartInfo.UseShellExecute = false;
                     exportProcess.StartInfo.RedirectStandardOutput = true;
                     exportProcess.StartInfo.RedirectStandardError = true;
