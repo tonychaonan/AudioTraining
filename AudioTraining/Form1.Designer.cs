@@ -44,6 +44,9 @@
             this.btnBrowseDataYaml = new System.Windows.Forms.Button();
             this.txtDataYaml = new System.Windows.Forms.TextBox();
             this.label4 = new System.Windows.Forms.Label();
+            this.labelPython = new System.Windows.Forms.Label();
+            this.btnBrowsePython = new System.Windows.Forms.Button();
+            this.txtPythonPath = new System.Windows.Forms.TextBox();
             this.numBatchSize = new System.Windows.Forms.NumericUpDown();
             this.label2 = new System.Windows.Forms.Label();
             this.numEpochs = new System.Windows.Forms.NumericUpDown();
@@ -202,13 +205,16 @@
             this.grpTrainParams.Controls.Add(this.btnBrowseDataYaml);
             this.grpTrainParams.Controls.Add(this.txtDataYaml);
             this.grpTrainParams.Controls.Add(this.label4);
+            this.grpTrainParams.Controls.Add(this.btnBrowsePython);
+            this.grpTrainParams.Controls.Add(this.txtPythonPath);
+            this.grpTrainParams.Controls.Add(this.labelPython);
             this.grpTrainParams.Controls.Add(this.numBatchSize);
             this.grpTrainParams.Controls.Add(this.label2);
             this.grpTrainParams.Controls.Add(this.numEpochs);
             this.grpTrainParams.Controls.Add(this.label1);
             this.grpTrainParams.Location = new System.Drawing.Point(20, 120);
             this.grpTrainParams.Name = "grpTrainParams";
-            this.grpTrainParams.Size = new System.Drawing.Size(600, 180);
+            this.grpTrainParams.Size = new System.Drawing.Size(600, 200);
             this.grpTrainParams.TabIndex = 1;
             this.grpTrainParams.TabStop = false;
             this.grpTrainParams.Text = "训练参数";
@@ -239,6 +245,33 @@
             this.label4.Size = new System.Drawing.Size(123, 15);
             this.label4.TabIndex = 4;
             this.label4.Text = "数据配置(Yaml):";
+            // 
+            // labelPython
+            // 
+            this.labelPython.AutoSize = true;
+            this.labelPython.Location = new System.Drawing.Point(6, 160);
+            this.labelPython.Name = "labelPython";
+            this.labelPython.Size = new System.Drawing.Size(100, 15);
+            this.labelPython.TabIndex = 7;
+            this.labelPython.Text = "Python 解释器:";
+            // 
+            // txtPythonPath
+            // 
+            this.txtPythonPath.Location = new System.Drawing.Point(119, 157);
+            this.txtPythonPath.Name = "txtPythonPath";
+            this.txtPythonPath.Size = new System.Drawing.Size(394, 25);
+            this.txtPythonPath.TabIndex = 8;
+            this.txtPythonPath.Text = "python";
+            // 
+            // btnBrowsePython
+            // 
+            this.btnBrowsePython.Location = new System.Drawing.Point(519, 156);
+            this.btnBrowsePython.Name = "btnBrowsePython";
+            this.btnBrowsePython.Size = new System.Drawing.Size(75, 23);
+            this.btnBrowsePython.TabIndex = 9;
+            this.btnBrowsePython.Text = "浏览...";
+            this.btnBrowsePython.UseVisualStyleBackColor = true;
+            this.btnBrowsePython.Click += new System.EventHandler(this.btnBrowsePython_Click);
             // 
             // numBatchSize
             // 
@@ -578,5 +611,8 @@
         private System.Windows.Forms.Button btnBrowseDataYaml;
         private System.Windows.Forms.TextBox txtDataYaml;
         private System.Windows.Forms.Label label4;
+        private System.Windows.Forms.Label labelPython;
+        private System.Windows.Forms.TextBox txtPythonPath;
+        private System.Windows.Forms.Button btnBrowsePython;
     }
 }

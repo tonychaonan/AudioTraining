@@ -173,12 +173,31 @@ namespace AudioTraining
             }
         }
 
+        private void btnBrowsePython_Click(object sender, EventArgs e)
+        {
+            using (var ofd = new OpenFileDialog())
+            {
+                ofd.Filter = "Python Executable (python.exe)|python.exe|All files (*.*)|*.*";
+                if (ofd.ShowDialog() == DialogResult.OK)
+                {
+                    txtPythonPath.Text = ofd.FileName;
+                }
+            }
+        }
+
         private async void btnStartTrain_Click(object sender, EventArgs e)
         {
             if (string.IsNullOrEmpty(_currentImageFolder))
             {
                 MessageBox.Show("请先加载图片目录并完成标注！");
                 return;
+            }
+
+            // Get Python Path
+            string pythonPath = txtPythonPath.Text.Trim();
+            if (string.IsNullOrEmpty(pythonPath))
+            {
+                pythonPath = "python"; // default fallback
             }
 
             // 1. Auto-Convert LabelMe JSON to YOLO
@@ -215,19 +234,24 @@ namespace AudioTraining
                 return;
             }
 
-            // 2. Auto-Generate data.yaml
-            string yamlPath = Path.Combine(_currentImageFolder, "data.yaml");
+            // 2. Prepare Dataset (Standard Structure & Split)
+            string datasetRoot = "";
+            string yamlPath = "";
             try
             {
-                AppendConsole("正在生成数据集配置 data.yaml...");
-                GenerateDataYaml(_currentImageFolder, yamlPath);
-                AppendConsole("配置生成完成。");
-                // Update UI to show what's being used (optional)
-                txtDataYaml.Text = yamlPath; 
+                AppendConsole("正在整理数据集目录结构 (Train/Val Split)...");
+                // Use DatasetManager to create Dataset_Prepared folder
+                datasetRoot = await Task.Run(() => DatasetManager.PrepareDataset(_currentImageFolder, Path.Combine(_currentImageFolder, "classes.txt")));
+                yamlPath = Path.Combine(datasetRoot, "data.yaml");
+                AppendConsole($"数据集整理完成: {datasetRoot}");
+                AppendConsole($"配置文件生成: {yamlPath}");
+                
+                // Update UI
+                txtDataYaml.Text = yamlPath;
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"生成配置失败: {ex.Message}");
+                MessageBox.Show($"数据集整理失败: {ex.Message}");
                 return;
             }
 
@@ -243,8 +267,12 @@ namespace AudioTraining
 
             // Setup output directory
             _currentTrainProject = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runs", "detect");
-            if (!Directory.Exists(_currentTrainProject)) Directory.CreateDirectory(_currentTrainProject);
-
+            // Python script handles its own output structure usually, but we pass project path to it or let it use default.
+            // In TrainingProcess, we didn't pass projectPath to the python script in the new implementation? 
+            // Let's check TrainingProcess. It seems I didn't pass projectPath in the new args.
+            // The python script hardcodes 'train_output'.
+            // For now, we rely on the python script's internal logic as requested.
+            
             // Clear previous charts
             foreach (var s in chartLoss.Series) s.Points.Clear();
             txtConsole.Clear();
@@ -254,37 +282,24 @@ namespace AudioTraining
             
             _monitorTimer.Start();
 
-            await _trainingProcess.StartTrainingAsync(yamlPath, modelSize, epochs, batch, _currentTrainProject);
+            // Note: TrainingProcess now calls python script. 
+            // The python script uses its own output dir 'train_output' in CWD.
+            // We might need to point _currentTrainProject to that for the chart to work.
+            // The script puts it in os.getcwd()/train_output/current_exp
+            // TrainingProcess runs in Scripts folder or BaseDirectory?
+            // TrainingProcess sets WorkingDirectory to Path.GetDirectoryName(scriptPath) which is .../Scripts.
+            // So output will be .../Scripts/train_output/current_exp.
+            // We need to update _currentTrainProject so the chart monitor can find results.csv.
+            
+            string scriptsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Scripts");
+            _currentTrainProject = Path.Combine(scriptsDir, "train_output");
+
+            await _trainingProcess.StartTrainingAsync(yamlPath, modelSize, epochs, batch, _currentTrainProject, pythonPath);
         }
 
-        private void GenerateDataYaml(string imageFolder, string outputPath)
-        {
-            string classesPath = Path.Combine(imageFolder, "classes.txt");
-            var lines = File.ReadAllLines(classesPath)
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Select(x => x.Trim())
-                .ToList();
+        // GenerateDataYaml removed as it is now in DatasetManager
+        // private void GenerateDataYaml(string imageFolder, string outputPath) ... 
 
-            if (lines.Count == 0) throw new Exception("classes.txt 内容为空。");
-
-            var sb = new StringBuilder();
-            // Use forward slashes for YAML compatibility
-            string safePath = imageFolder.Replace("\\", "/");
-
-            sb.AppendLine($"path: {safePath}");
-            sb.AppendLine("train: .");
-            sb.AppendLine("val: .");
-            sb.AppendLine();
-            sb.AppendLine($"nc: {lines.Count}");
-            sb.AppendLine("names:");
-            for (int i = 0; i < lines.Count; i++)
-            {
-                // Quote names to be safe
-                sb.AppendLine($"  {i}: \"{lines[i]}\"");
-            }
-
-            File.WriteAllText(outputPath, sb.ToString());
-        }
 
         private void btnStopTrain_Click(object sender, EventArgs e)
         {

@@ -24,27 +24,27 @@ namespace AudioTraining
 
         public bool IsRunning => _process != null && !_process.HasExited;
 
-        public async Task StartTrainingAsync(string dataYamlPath, string modelSize, int epochs, int batchSize, string projectPath)
+        public async Task StartTrainingAsync(string dataYamlPath, string modelSize, int epochs, int batchSize, string projectPath, string pythonPath)
         {
-            string toolRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Tools", "yolo");
-            string yoloPath = Path.Combine(toolRoot, "yolo.exe");
-
-            if (!File.Exists(yoloPath))
+            // We need to find the python script
+            string scriptPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Scripts", "train_wrapper.py");
+            if (!File.Exists(scriptPath))
             {
-                OnOutput($"Error: 找不到 yolo.exe，请确认文件是否存在于: {yoloPath}");
+                OnOutput($"Error: 找不到训练脚本: {scriptPath}");
                 return;
             }
 
-            string modelName = $"yolov8{modelSize}.pt"; // n, s, m
-            
-            // Construct command
-            // yolo detect train data=data.yaml model=yolov8n.pt epochs=100 batch=16 project=runs name=train_exp
-            string args = $"detect train data=\"{dataYamlPath}\" model={modelName} epochs={epochs} batch={batchSize} project=\"{projectPath}\" name=exp exist_ok=True";
+            // Use provided python path or default to "python"
+            string pythonExe = string.IsNullOrWhiteSpace(pythonPath) ? "python" : pythonPath;
+
+            // Arguments: <yaml_path> <epochs> <img_size> [device]
+            int imgSize = 640; 
+            string args = $"\"{scriptPath}\" \"{dataYamlPath}\" {epochs} {imgSize}";
 
             _process = new Process();
-            _process.StartInfo.FileName = yoloPath;
+            _process.StartInfo.FileName = pythonExe;
             _process.StartInfo.Arguments = args;
-            _process.StartInfo.WorkingDirectory = toolRoot;
+            _process.StartInfo.WorkingDirectory = Path.GetDirectoryName(scriptPath); // Run in Scripts folder or BaseDirectory
             _process.StartInfo.UseShellExecute = false;
             _process.StartInfo.RedirectStandardOutput = true;
             _process.StartInfo.RedirectStandardError = true;
@@ -56,13 +56,13 @@ namespace AudioTraining
             _process.EnableRaisingEvents = true;
             _process.Exited += (s, e) => 
             {
-                OnOutput("Training process exited.");
-                ExportToOnnx(projectPath, modelSize);
+                OnOutput("Python training process exited.");
                 TrainingCompleted?.Invoke(this, EventArgs.Empty);
             };
 
             try
             {
+                OnOutput($"Starting Python script: {pythonExe} {args}");
                 _process.Start();
                 _process.BeginOutputReadLine();
                 _process.BeginErrorReadLine();
@@ -71,57 +71,11 @@ namespace AudioTraining
             }
             catch (Exception ex)
             {
-                OnOutput($"Error starting training: {ex.Message}");
+                OnOutput($"Error starting python process: {ex.Message}. Make sure 'python' is installed and in PATH.");
             }
         }
 
-        private void ExportToOnnx(string projectPath, string modelSize)
-        {
-            try
-            {
-                string toolRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Tools", "yolo");
-                string yoloPath = Path.Combine(toolRoot, "yolo.exe");
-
-                if (!File.Exists(yoloPath))
-                {
-                    OnOutput($"Error: 找不到 yolo.exe，无法导出模型。");
-                    return;
-                }
-
-                // Best model path: projectPath/exp/weights/best.pt
-                string bestWeights = Path.Combine(projectPath, "exp", "weights", "best.pt");
-                if (File.Exists(bestWeights))
-                {
-                    OnOutput("Exporting to ONNX...");
-                    var exportProcess = new Process();
-                    exportProcess.StartInfo.FileName = yoloPath;
-                    exportProcess.StartInfo.Arguments = $"export model=\"{bestWeights}\" format=onnx";
-                    exportProcess.StartInfo.WorkingDirectory = toolRoot;
-                    exportProcess.StartInfo.UseShellExecute = false;
-                    exportProcess.StartInfo.RedirectStandardOutput = true;
-                    exportProcess.StartInfo.RedirectStandardError = true;
-                    exportProcess.StartInfo.CreateNoWindow = true;
-                    
-                    exportProcess.OutputDataReceived += (s, e) => OnOutput(e.Data);
-                    exportProcess.ErrorDataReceived += (s, e) => OnOutput(e.Data);
-                    
-                    exportProcess.Start();
-                    exportProcess.BeginOutputReadLine();
-                    exportProcess.BeginErrorReadLine();
-                    exportProcess.WaitForExit();
-                    
-                    OnOutput("Export completed.");
-                }
-                else
-                {
-                    OnOutput($"Could not find best.pt at {bestWeights}");
-                }
-            }
-            catch (Exception ex)
-            {
-                OnOutput($"Export failed: {ex.Message}");
-            }
-        }
+        // Removed separate ExportToOnnx as it is handled by the python script now.
 
         private void ParseOutput(string line)
         {
