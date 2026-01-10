@@ -43,7 +43,8 @@ def main():
         project=project_path, 
         name=exp_name,
         device=device,
-        exist_ok=True # Overwrite existing experiment folder so path is deterministic
+        exist_ok=True, # Overwrite existing experiment folder so path is deterministic
+        workers=0      # Fix for Windows Error 1455 (Page file too small for shared memory)
     )
 
     print("--- Python Engine: Training Finished ---")

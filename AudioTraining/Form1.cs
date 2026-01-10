@@ -334,11 +334,40 @@ namespace AudioTraining
             
             // Try final CSV read
             MonitorTimer_Tick(null, null);
+
+            // Popup Result
+            if (_trainingProcess.ExitCode == 0 && !string.IsNullOrEmpty(_trainingProcess.OnnxModelPath))
+            {
+                MessageBox.Show($"训练成功！\nONNX模型已导出至:\n{_trainingProcess.OnnxModelPath}", 
+                                "训练完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                string errorInfo = "未知错误";
+                if (!string.IsNullOrEmpty(_trainingProcess.ErrorLog))
+                {
+                    // Limit log length for messagebox
+                    errorInfo = _trainingProcess.ErrorLog.Length > 800 
+                        ? "..." + _trainingProcess.ErrorLog.Substring(_trainingProcess.ErrorLog.Length - 800) 
+                        : _trainingProcess.ErrorLog;
+                }
+                
+                MessageBox.Show($"训练失败 (ExitCode: {_trainingProcess.ExitCode})\n原因:\n{errorInfo}", 
+                                "训练出错", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void AppendConsole(string text)
         {
             if (string.IsNullOrEmpty(text)) return;
+
+            // Prevent OutOfMemoryException by limiting log size
+            if (txtConsole.TextLength > 30000)
+            {
+                txtConsole.Clear();
+                txtConsole.AppendText("[Log cleared to save memory...]" + Environment.NewLine);
+            }
+
             txtConsole.AppendText(text + Environment.NewLine);
             txtConsole.ScrollToCaret();
         }
@@ -472,7 +501,8 @@ namespace AudioTraining
             try
             {
                 Bitmap bmp = new Bitmap(imagePath);
-                var predictions = _yoloInference.Predict(bmp);
+                // Lower threshold to 0.25 for validation to see more potential boxes
+                var predictions = _yoloInference.Predict(bmp, 0.25f);
 
                 // Draw result
                 Bitmap drawn = new Bitmap(bmp);
@@ -509,6 +539,13 @@ namespace AudioTraining
                 StringBuilder sb = new StringBuilder();
                 sb.AppendLine($"Image: {Path.GetFileName(imagePath)}");
                 sb.AppendLine($"Count: {predictions.Count}");
+                sb.AppendLine($"Max Confidence: {_yoloInference.TopConfidence:F4}"); // Show max confidence
+                
+                if (predictions.Count == 0 && _yoloInference.TopConfidence > 0)
+                {
+                    sb.AppendLine("(Try lowering threshold if Max Confidence is reasonable)");
+                }
+
                 foreach (var p in predictions)
                 {
                     sb.AppendLine($"Class: {p.ClassId}, Conf: {p.Confidence:F2}, Rect: {p.Rectangle}");

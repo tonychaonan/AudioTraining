@@ -53,25 +53,25 @@ namespace AudioTraining.Services
             // 3. Split and Copy
             int valCount = (int)(imageFiles.Count * valSplit);
             
-            for (int i = 0; i < imageFiles.Count; i++)
+            // Fix for small datasets: ensure at least 1 val image if we have >1 images
+            if (valCount == 0 && imageFiles.Count > 1) valCount = 1;
+
+            // Also ensure we don't put everything in val (though unlikely with default 0.2 split)
+            if (valCount >= imageFiles.Count && imageFiles.Count > 1) valCount = imageFiles.Count - 1;
+
+            // Special case: Single image -> copy to BOTH train and val to avoid empty set errors
+            if (imageFiles.Count == 1)
             {
-                string srcImgPath = imageFiles[i];
-                string fileNameNoExt = Path.GetFileNameWithoutExtension(srcImgPath);
-                string srcTxtPath = Path.Combine(sourceFolder, fileNameNoExt + ".txt");
-
-                // Determine target folders
-                string targetImgDir = (i < valCount) ? valImgDir : trainImgDir;
-                string targetLblDir = (i < valCount) ? valLblDir : trainLblDir;
-
-                // Copy Image
-                string destImgPath = Path.Combine(targetImgDir, Path.GetFileName(srcImgPath));
-                File.Copy(srcImgPath, destImgPath, true);
-
-                // Copy Label (if exists)
-                if (File.Exists(srcTxtPath))
+                CopyFilePair(imageFiles[0], sourceFolder, trainImgDir, trainLblDir);
+                CopyFilePair(imageFiles[0], sourceFolder, valImgDir, valLblDir);
+            }
+            else
+            {
+                for (int i = 0; i < imageFiles.Count; i++)
                 {
-                    string destTxtPath = Path.Combine(targetLblDir, fileNameNoExt + ".txt");
-                    File.Copy(srcTxtPath, destTxtPath, true);
+                    string targetImgDir = (i < valCount) ? valImgDir : trainImgDir;
+                    string targetLblDir = (i < valCount) ? valLblDir : trainLblDir;
+                    CopyFilePair(imageFiles[i], sourceFolder, targetImgDir, targetLblDir);
                 }
             }
 
@@ -79,6 +79,23 @@ namespace AudioTraining.Services
             GenerateDataYaml(datasetRoot, classesFile);
 
             return datasetRoot;
+        }
+
+        private static void CopyFilePair(string srcImgPath, string sourceFolder, string targetImgDir, string targetLblDir)
+        {
+            string fileNameNoExt = Path.GetFileNameWithoutExtension(srcImgPath);
+            string srcTxtPath = Path.Combine(sourceFolder, fileNameNoExt + ".txt");
+
+            // Copy Image
+            string destImgPath = Path.Combine(targetImgDir, Path.GetFileName(srcImgPath));
+            File.Copy(srcImgPath, destImgPath, true);
+
+            // Copy Label (if exists)
+            if (File.Exists(srcTxtPath))
+            {
+                string destTxtPath = Path.Combine(targetLblDir, fileNameNoExt + ".txt");
+                File.Copy(srcTxtPath, destTxtPath, true);
+            }
         }
 
         private static void GenerateDataYaml(string datasetRoot, string classesFile)

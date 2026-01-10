@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
@@ -23,9 +24,20 @@ namespace AudioTraining
         public event EventHandler TrainingCompleted;
 
         public bool IsRunning => _process != null && !_process.HasExited;
+        
+        public int ExitCode { get; private set; }
+        public string ErrorLog { get; private set; }
+        public string OnnxModelPath { get; private set; }
+        
+        private StringBuilder _errorBuffer;
 
         public async Task StartTrainingAsync(string dataYamlPath, string modelSize, int epochs, int batchSize, string projectPath, string pythonPath)
         {
+            _errorBuffer = new StringBuilder();
+            ExitCode = 0;
+            OnnxModelPath = null;
+            ErrorLog = string.Empty;
+
             // We need to find the python script
             string scriptPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Scripts", "train_wrapper.py");
             if (!File.Exists(scriptPath))
@@ -50,12 +62,14 @@ namespace AudioTraining
             _process.StartInfo.RedirectStandardError = true;
             _process.StartInfo.CreateNoWindow = true;
 
-            _process.OutputDataReceived += (s, e) => ParseOutput(e.Data);
-            _process.ErrorDataReceived += (s, e) => ParseOutput(e.Data);
+            _process.OutputDataReceived += (s, e) => ParseOutput(e.Data, false);
+            _process.ErrorDataReceived += (s, e) => ParseOutput(e.Data, true);
 
             _process.EnableRaisingEvents = true;
             _process.Exited += (s, e) => 
             {
+                ExitCode = _process.ExitCode;
+                ErrorLog = _errorBuffer.ToString();
                 OnOutput("Python training process exited.");
                 TrainingCompleted?.Invoke(this, EventArgs.Empty);
             };
@@ -77,9 +91,25 @@ namespace AudioTraining
 
         // Removed separate ExportToOnnx as it is handled by the python script now.
 
-        private void ParseOutput(string line)
+        private void ParseOutput(string line, bool isError)
         {
             if (string.IsNullOrEmpty(line)) return;
+
+            if (isError)
+            {
+                _errorBuffer.AppendLine(line);
+            }
+
+            // Capture ONNX Path
+            if (line.Contains("--- ONNX Path:"))
+            {
+                var parts = line.Split(new[] { "--- ONNX Path:" }, StringSplitOptions.None);
+                if (parts.Length > 1)
+                {
+                    OnnxModelPath = parts[1].Trim().Trim('-');
+                    OnnxModelPath = OnnxModelPath.Trim();
+                }
+            }
 
             var args = new TrainingEventArgs { Message = line };
 
@@ -98,14 +128,6 @@ namespace AudioTraining
                     args.TotalEpochs = total;
                 }
             }
-
-            // Simple regex for Loss (heuristic, might need adjustment based on specific yolo version output)
-            // Look for "box_loss" or just floating point numbers in the progress bar line
-            // This is brittle, but better than nothing for a demo.
-            // Often: "box_loss" "cls_loss" "dfl_loss" in header, then numbers.
-            
-            // For now, we just pass the raw line to the UI console, 
-            // and maybe try to grab 'box' loss if it's explicitly labeled or structured.
             
             OutputReceived?.Invoke(this, args);
         }
