@@ -31,7 +31,7 @@ namespace AudioTraining
         
         private StringBuilder _errorBuffer;
 
-        public async Task StartTrainingAsync(string dataYamlPath, string modelSize, int epochs, int batchSize, string projectPath, string pythonPath)
+        public async Task StartTrainingAsync(string dataYamlPath, string modelSize, int epochs, int batchSize, string projectPath, string pythonPath, bool useOBB = false)
         {
             _errorBuffer = new StringBuilder();
             ExitCode = 0;
@@ -49,9 +49,10 @@ namespace AudioTraining
             // Use provided python path or default to "python"
             string pythonExe = string.IsNullOrWhiteSpace(pythonPath) ? "python" : pythonPath;
 
-            // Arguments: <yaml_path> <epochs> <img_size> [device]
-            int imgSize = 640; 
-            string args = $"\"{scriptPath}\" \"{dataYamlPath}\" {epochs} {imgSize}";
+            // Arguments: <yaml_path> <epochs> <img_size> <model_type> [device]
+            int imgSize = 640;
+            string modelType = useOBB ? "obb" : "detect";
+            string args = $"\"{scriptPath}\" \"{dataYamlPath}\" {epochs} {imgSize} {modelType}";
 
             _process = new Process();
             _process.StartInfo.FileName = pythonExe;

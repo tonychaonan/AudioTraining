@@ -3,24 +3,29 @@ import os
 from ultralytics import YOLO
 
 def main():
-    if len(sys.argv) < 4:
-        print("Usage: python train_wrapper.py <yaml_path> <epochs> <img_size> [device]")
+    if len(sys.argv) < 5:
+        print("Usage: python train_wrapper.py <yaml_path> <epochs> <img_size> <model_type> [device]")
         return
 
     # 1. Receive parameters from C#
     yaml_path = sys.argv[1]
     epochs_count = int(sys.argv[2])
     img_size = int(sys.argv[3])
+    model_type = sys.argv[4]  # 'detect' or 'obb'
     
     # Optional device argument, default to 0 (GPU 0) or cpu
     device = '0'
-    if len(sys.argv) > 4:
-        device = sys.argv[4]
+    if len(sys.argv) > 5:
+        device = sys.argv[5]
 
     print("--- Python Engine: Loading Model ---")
-    # Load pretrained model (yolov8n.pt)
-    # Ensure yolov8n.pt is available or let it download
-    model = YOLO('yolov8n.pt') 
+    # Load pretrained model based on type
+    if model_type == 'obb':
+        print("Loading YOLOv8-OBB model for oriented bounding box detection...")
+        model = YOLO('yolov8n-obb.pt')  # OBB model for rotated detection
+    else:
+        print("Loading YOLOv8 standard detection model...")
+        model = YOLO('yolov8n.pt')  # Standard detection model 
 
     print(f"--- Python Engine: Start Training ({epochs_count} epochs, size {img_size}) ---")
 

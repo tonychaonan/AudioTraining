@@ -20,10 +20,12 @@ namespace AudioTraining
         private List<string> _imageFiles;
         private TrainingProcess _trainingProcess;
         private YoloInference _yoloInference;
+        private YoloOBBInference _yoloOBBInference;
         private Timer _monitorTimer;
         private string _currentTrainProject;
         private string _currentTrainName = "exp";
         private string _loadedOnnxPath;
+        private bool _useOBBModel = false;
 
         public Form1()
         {
@@ -34,12 +36,14 @@ namespace AudioTraining
         private void InitializeCustom()
         {
             cmbModelSize.SelectedIndex = 0; // Default to 'n'
+            cmbModelType.SelectedIndex = 0; // Default to standard detection
             
             _trainingProcess = new TrainingProcess();
             _trainingProcess.OutputReceived += OnTrainingOutputReceived;
             _trainingProcess.TrainingCompleted += OnTrainingCompleted;
 
             _yoloInference = new YoloInference();
+            _yoloOBBInference = new YoloOBBInference();
 
             _monitorTimer = new Timer();
             _monitorTimer.Interval = 2000; // Check every 2 seconds
@@ -200,6 +204,9 @@ namespace AudioTraining
                 pythonPath = "python"; // default fallback
             }
 
+            // Determine model type
+            _useOBBModel = (cmbModelType.SelectedIndex == 1); // 0=Standard, 1=OBB
+
             // 1. Auto-Convert LabelMe JSON to YOLO
             try
             {
@@ -223,9 +230,18 @@ namespace AudioTraining
 
                 if (File.Exists(classesFile))
                 {
-                    AppendConsole("正在转换 LabelMe JSON 到 YOLO 格式...");
-                    await Task.Run(() => LabelmeConverter.ConvertFolder(_currentImageFolder, classesFile));
-                    AppendConsole("转换完成。");
+                    if (_useOBBModel)
+                    {
+                        AppendConsole("正在转换 LabelMe JSON 到 YOLO-OBB 格式...");
+                        await Task.Run(() => LabelmeConverter.ConvertFolderToOBB(_currentImageFolder, classesFile));
+                        AppendConsole("OBB 格式转换完成。");
+                    }
+                    else
+                    {
+                        AppendConsole("正在转换 LabelMe JSON 到 YOLO 格式...");
+                        await Task.Run(() => LabelmeConverter.ConvertFolder(_currentImageFolder, classesFile));
+                        AppendConsole("转换完成。");
+                    }
                 }
             }
             catch (Exception ex)
@@ -294,7 +310,7 @@ namespace AudioTraining
             string scriptsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Scripts");
             _currentTrainProject = Path.Combine(scriptsDir, "train_output");
 
-            await _trainingProcess.StartTrainingAsync(yamlPath, modelSize, epochs, batch, _currentTrainProject, pythonPath);
+            await _trainingProcess.StartTrainingAsync(yamlPath, modelSize, epochs, batch, _currentTrainProject, pythonPath, _useOBBModel);
         }
 
         // GenerateDataYaml removed as it is now in DatasetManager
@@ -455,6 +471,19 @@ namespace AudioTraining
 
         private void btnLoadModel_Click(object sender, EventArgs e)
         {
+            // Ask user to select model type before loading
+            var result = MessageBox.Show(
+                "请选择模型类型：\n\n是(Yes) = OBB旋转模型\n否(No) = 标准YOLO模型",
+                "选择模型类型",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question
+            );
+
+            if (result == DialogResult.Cancel)
+                return;
+
+            _useOBBModel = (result == DialogResult.Yes);
+            
             using (var ofd = new OpenFileDialog())
             {
                 ofd.Filter = "ONNX Models (*.onnx)|*.onnx|All files (*.*)|*.*";
@@ -469,14 +498,26 @@ namespace AudioTraining
                         // Attempt to load labels from adjacent data.yaml if exists?
                         // Simple fallback: 0..N
                         
-                        _yoloInference.LoadModel(ofd.FileName, labels);
+                        // Load model based on user selection
+                        if (_useOBBModel)
+                        {
+                            _yoloOBBInference.LoadModel(ofd.FileName, labels);
+                            LoggerService.Info($"加载OBB模型: {Path.GetFileName(ofd.FileName)}");
+                        }
+                        else
+                        {
+                            _yoloInference.LoadModel(ofd.FileName, labels);
+                            LoggerService.Info($"加载标准YOLO模型: {Path.GetFileName(ofd.FileName)}");
+                        }
+                        
                         _loadedOnnxPath = ofd.FileName;
                         btnTestImage.Enabled = true;
-                        MessageBox.Show("模型加载成功！");
+                        MessageBox.Show($"模型加载成功！\n类型: {(_useOBBModel ? "OBB旋转模型" : "标准YOLO模型")}");
                     }
                     catch (Exception ex)
                     {
                         MessageBox.Show($"模型加载失败: {ex.Message}");
+                        LoggerService.Error(ex, "模型加载失败");
                     }
                 }
             }
@@ -496,60 +537,112 @@ namespace AudioTraining
 
         private void RunValidation(string imagePath)
         {
-            if (!_yoloInference.IsModelLoaded) return;
+            if (_useOBBModel)
+            {
+                if (!_yoloOBBInference.IsModelLoaded) return;
+            }
+            else
+            {
+                if (!_yoloInference.IsModelLoaded) return;
+            }
 
             try
             {
                 Bitmap bmp = new Bitmap(imagePath);
-                // Lower threshold to 0.25 for validation to see more potential boxes
-                var predictions = _yoloInference.Predict(bmp, 0.25f);
-
-                // Draw result
                 Bitmap drawn = new Bitmap(bmp);
-                using (var g = Graphics.FromImage(drawn))
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine($"Image: {Path.GetFileName(imagePath)}");
+
+                if (_useOBBModel)
                 {
-                    foreach (var pred in predictions)
+                    // OBB Model - use higher threshold for OBB models
+                    var predictions = _yoloOBBInference.Predict(bmp, 0.7f);
+                    
+                    LoggerService.LogInference("OBB", predictions.Count, _yoloOBBInference.TopConfidence);
+
+                    using (var g = Graphics.FromImage(drawn))
                     {
-                        float x = pred.Rectangle.X;
-                        float y = pred.Rectangle.Y;
-                        float w = pred.Rectangle.Width;
-                        float h = pred.Rectangle.Height;
-
-                        using (var pen = new Pen(Color.Red, 2))
+                        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                        
+                        foreach (var pred in predictions)
                         {
-                            g.DrawRectangle(pen, x, y, w, h);
-                        }
+                            // Draw rotated bounding box
+                            using (var pen = new Pen(Color.Red, 2))
+                            {
+                                g.DrawPolygon(pen, pred.RotatedBox);
+                            }
 
-                        string label = $"{pred.Label} {pred.Confidence:F2}";
-                        using (var brush = new SolidBrush(Color.Red))
-                        using (var font = new Font("Arial", 12))
-                        {
-                            g.DrawString(label, font, brush, x, y - 20);
+                            // Draw label at first corner
+                            string label = $"{pred.Label} {pred.Confidence:F2} ({pred.Angle:F1}°)";
+                            using (var brush = new SolidBrush(Color.Red))
+                            using (var font = new Font("Arial", 12))
+                            {
+                                g.DrawString(label, font, brush, pred.RotatedBox[0].X, pred.RotatedBox[0].Y - 20);
+                            }
                         }
+                    }
+
+                    sb.AppendLine($"Count: {predictions.Count}");
+                    sb.AppendLine($"Max Confidence: {_yoloOBBInference.TopConfidence:F4}");
+                    
+                    if (predictions.Count == 0 && _yoloOBBInference.TopConfidence > 0)
+                    {
+                        sb.AppendLine("(Try lowering threshold if Max Confidence is reasonable)");
+                    }
+
+                    foreach (var p in predictions)
+                    {
+                        sb.AppendLine($"Class: {p.ClassId}, Conf: {p.Confidence:F2}, Angle: {p.Angle:F1}°");
+                    }
+                }
+                else
+                {
+                    // Standard Model
+                    var predictions = _yoloInference.Predict(bmp, 0.25f);
+                    
+                    LoggerService.LogInference("Standard", predictions.Count, _yoloInference.TopConfidence);
+
+                    using (var g = Graphics.FromImage(drawn))
+                    {
+                        foreach (var pred in predictions)
+                        {
+                            float x = pred.Rectangle.X;
+                            float y = pred.Rectangle.Y;
+                            float w = pred.Rectangle.Width;
+                            float h = pred.Rectangle.Height;
+
+                            using (var pen = new Pen(Color.Red, 2))
+                            {
+                                g.DrawRectangle(pen, x, y, w, h);
+                            }
+
+                            string label = $"{pred.Label} {pred.Confidence:F2}";
+                            using (var brush = new SolidBrush(Color.Red))
+                            using (var font = new Font("Arial", 12))
+                            {
+                                g.DrawString(label, font, brush, x, y - 20);
+                            }
+                        }
+                    }
+
+                    sb.AppendLine($"Count: {predictions.Count}");
+                    sb.AppendLine($"Max Confidence: {_yoloInference.TopConfidence:F4}");
+                    
+                    if (predictions.Count == 0 && _yoloInference.TopConfidence > 0)
+                    {
+                        sb.AppendLine("(Try lowering threshold if Max Confidence is reasonable)");
+                    }
+
+                    foreach (var p in predictions)
+                    {
+                        sb.AppendLine($"Class: {p.ClassId}, Conf: {p.Confidence:F2}, Rect: {p.Rectangle}");
                     }
                 }
 
                 picValidPreview.Image?.Dispose();
                 picValidPreview.Image = drawn;
                 
-                // Dispose original
                 bmp.Dispose();
-
-                // Text Result
-                StringBuilder sb = new StringBuilder();
-                sb.AppendLine($"Image: {Path.GetFileName(imagePath)}");
-                sb.AppendLine($"Count: {predictions.Count}");
-                sb.AppendLine($"Max Confidence: {_yoloInference.TopConfidence:F4}"); // Show max confidence
-                
-                if (predictions.Count == 0 && _yoloInference.TopConfidence > 0)
-                {
-                    sb.AppendLine("(Try lowering threshold if Max Confidence is reasonable)");
-                }
-
-                foreach (var p in predictions)
-                {
-                    sb.AppendLine($"Class: {p.ClassId}, Conf: {p.Confidence:F2}, Rect: {p.Rectangle}");
-                }
                 txtValidResult.Text = sb.ToString();
             }
             catch (Exception ex)

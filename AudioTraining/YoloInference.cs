@@ -162,7 +162,8 @@ namespace AudioTraining
                 {
                     // If transposed: [0, i, 4+c]
                     // If not: [0, 4+c, i]
-                    float score = transposed ? output[0, i, 4 + c] : output[0, 4 + c, i];
+                    float rawScore = transposed ? output[0, i, 4 + c] : output[0, 4 + c, i];
+                    float score = Sigmoid(rawScore);  // Apply sigmoid to convert to probability
                     
                     if (score > maxClassScore)
                     {
@@ -247,6 +248,11 @@ namespace AudioTraining
             float area2 = rect2.Width * rect2.Height;
 
             return intersectionArea / (area1 + area2 - intersectionArea);
+        }
+
+        private float Sigmoid(float x)
+        {
+            return 1.0f / (1.0f + (float)Math.Exp(-x));
         }
 
         public void Dispose()

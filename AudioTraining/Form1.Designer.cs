@@ -53,6 +53,8 @@
             this.label1 = new System.Windows.Forms.Label();
             this.grpModel = new System.Windows.Forms.GroupBox();
             this.cmbModelSize = new System.Windows.Forms.ComboBox();
+            this.cmbModelType = new System.Windows.Forms.ComboBox();
+            this.labelModelType = new System.Windows.Forms.Label();
             this.label3 = new System.Windows.Forms.Label();
             this.tabTrain = new System.Windows.Forms.TabPage();
             this.tableLayoutPanelTrain = new System.Windows.Forms.TableLayoutPanel();
@@ -212,7 +214,7 @@
             this.grpTrainParams.Controls.Add(this.label2);
             this.grpTrainParams.Controls.Add(this.numEpochs);
             this.grpTrainParams.Controls.Add(this.label1);
-            this.grpTrainParams.Location = new System.Drawing.Point(20, 120);
+            this.grpTrainParams.Location = new System.Drawing.Point(20, 160);
             this.grpTrainParams.Name = "grpTrainParams";
             this.grpTrainParams.Size = new System.Drawing.Size(600, 200);
             this.grpTrainParams.TabIndex = 1;
@@ -337,11 +339,13 @@
             // 
             // grpModel
             // 
+            this.grpModel.Controls.Add(this.cmbModelType);
+            this.grpModel.Controls.Add(this.labelModelType);
             this.grpModel.Controls.Add(this.cmbModelSize);
             this.grpModel.Controls.Add(this.label3);
             this.grpModel.Location = new System.Drawing.Point(20, 20);
             this.grpModel.Name = "grpModel";
-            this.grpModel.Size = new System.Drawing.Size(600, 80);
+            this.grpModel.Size = new System.Drawing.Size(600, 120);
             this.grpModel.TabIndex = 0;
             this.grpModel.TabStop = false;
             this.grpModel.Text = "模型选择";
@@ -358,6 +362,27 @@
             this.cmbModelSize.Name = "cmbModelSize";
             this.cmbModelSize.Size = new System.Drawing.Size(120, 23);
             this.cmbModelSize.TabIndex = 1;
+            // 
+            // cmbModelType
+            // 
+            this.cmbModelType.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbModelType.FormattingEnabled = true;
+            this.cmbModelType.Items.AddRange(new object[] {
+            "标准检测 (Standard)",
+            "旋转检测 (OBB)"});
+            this.cmbModelType.Location = new System.Drawing.Point(110, 70);
+            this.cmbModelType.Name = "cmbModelType";
+            this.cmbModelType.Size = new System.Drawing.Size(200, 23);
+            this.cmbModelType.TabIndex = 3;
+            // 
+            // labelModelType
+            // 
+            this.labelModelType.AutoSize = true;
+            this.labelModelType.Location = new System.Drawing.Point(20, 73);
+            this.labelModelType.Name = "labelModelType";
+            this.labelModelType.Size = new System.Drawing.Size(75, 15);
+            this.labelModelType.TabIndex = 2;
+            this.labelModelType.Text = "模型类型:";
             // 
             // label3
             // 
@@ -596,6 +621,8 @@
         private System.Windows.Forms.GroupBox grpModel;
         private System.Windows.Forms.ComboBox cmbModelSize;
         private System.Windows.Forms.Label label3;
+        private System.Windows.Forms.ComboBox cmbModelType;
+        private System.Windows.Forms.Label labelModelType;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanelTrain;
         private System.Windows.Forms.DataVisualization.Charting.Chart chartLoss;
         private System.Windows.Forms.RichTextBox txtConsole;
