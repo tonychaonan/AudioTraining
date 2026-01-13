@@ -128,38 +128,64 @@ namespace AudioTraining
                 return;
             }
 
-            // Try to launch labelme from local Tools folder
             try
             {
-                string toolRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Tools", "LabelImg");
-                // User requested labelme.exe
-                string exePath = Path.Combine(toolRoot, "labelme.exe");
+                string toolRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Tools", "X-AnyLabeling");
+                string exePath = Path.Combine(toolRoot, "X-AnyLabeling-CPU.exe");
+
+                //if (File.Exists(exePath))
+                //{
+                //    // Launch X-AnyLabeling with the current image folder
+                //    string args = $"\"{_currentImageFolder}\"";
+
+                //    Process.Start(new ProcessStartInfo(exePath)
+                //    {
+                //        //Arguments = args,
+                //        WorkingDirectory = toolRoot
+                //    });
+                //}
 
                 if (File.Exists(exePath))
                 {
-                    // labelme [dir] --labels [classes_file]
-                    string classesPath = Path.Combine(_currentImageFolder, "classes.txt");
-                    string args = $"\"{_currentImageFolder}\"";
-                    
-                    if (File.Exists(classesPath))
-                    {
-                        args += $" --labels \"{classesPath}\"";
-                    }
+                    // 1. 去除路径末尾的反斜杠，防止转义双引号
+                    // 例如把 "D:\Images\" 变成 "D:\Images"
+                    string cleanPath = _currentImageFolder.TrimEnd('\\', '/');
 
-                    Process.Start(new ProcessStartInfo(exePath)
+                    // 2. 再加上引号，处理路径中可能包含的空格
+                    string args = $"\"{cleanPath}\"";
+
+                    ProcessStartInfo psi = new ProcessStartInfo(exePath)
                     {
-                        Arguments = args,
-                        WorkingDirectory = toolRoot
-                    });
+                        //Arguments = args,
+                        WorkingDirectory = toolRoot,
+                        UseShellExecute = false // 建议设为false，这样更稳定
+                    };
+
+                    try
+                    {
+                        Process.Start(psi);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"启动失败: {ex.Message}");
+                    }
                 }
                 else
                 {
-                    MessageBox.Show($"找不到 labelme.exe。\n请确保文件存在于: {exePath}");
+                    MessageBox.Show(
+                        $"找不到 X-AnyLabeling.exe\n\n" +
+                        $"预期路径: {exePath}\n\n" +
+                        $"请下载 X-AnyLabeling 并放置到 Tools 文件夹中。\n" +
+                        $"下载地址: https://github.com/CVHub520/X-AnyLabeling",
+                        "X-AnyLabeling 未找到",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information
+                    );
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"无法启动 labelme: {ex.Message}");
+                MessageBox.Show($"无法启动 X-AnyLabeling: {ex.Message}");
             }
         }
 
@@ -204,49 +230,69 @@ namespace AudioTraining
                 pythonPath = "python"; // default fallback
             }
 
-            // Determine model type
-            _useOBBModel = (cmbModelType.SelectedIndex == 1); // 0=Standard, 1=OBB
-
-            // 1. Auto-Convert LabelMe JSON to YOLO
+            // 1. Validate X-AnyLabeling annotations
             try
             {
                 string classesFile = Path.Combine(_currentImageFolder, "classes.txt");
                 
-                // Auto-generate classes.txt if missing
+                // Check if classes.txt exists (required by X-AnyLabeling)
                 if (!File.Exists(classesFile))
                 {
-                    AppendConsole("检测到 classes.txt 缺失，正在扫描 JSON 文件自动生成...");
-                    await Task.Run(() => LabelmeConverter.GenerateClassesFile(_currentImageFolder, classesFile));
-                    if (File.Exists(classesFile))
+                    MessageBox.Show($"未找到 classes.txt 文件！\n\n请确保使用 X-AnyLabeling 标注工具，并已导出标注数据。\n路径: {classesFile}");
+                    return;
+                }
+
+                // Validate that TXT annotation files exist
+                var imageFiles = Directory.GetFiles(_currentImageFolder, "*.jpg")
+                    .Concat(Directory.GetFiles(_currentImageFolder, "*.png"))
+                    .Concat(Directory.GetFiles(_currentImageFolder, "*.bmp"))
+                    .ToList();
+
+                if (imageFiles.Count == 0)
+                {
+                    MessageBox.Show("未找到图片文件！请检查数据文件夹。");
+                    return;
+                }
+
+                int txtCount = 0;
+                foreach (var imgFile in imageFiles)
+                {
+                    string txtFile = Path.ChangeExtension(imgFile, ".txt");
+                    if (File.Exists(txtFile))
                     {
-                        AppendConsole($"已自动生成类别文件: {classesFile}");
+                        txtCount++;
                     }
-                    else
+                }
+
+                AppendConsole($"检测到 classes.txt: {classesFile}");
+                AppendConsole($"图片数量: {imageFiles.Count}, 标注文件(TXT): {txtCount}");
+
+                if (txtCount == 0)
+                {
+                    MessageBox.Show($"未找到任何标注文件(.txt)！\n\n请使用 X-AnyLabeling 标注工具完成标注并导出。");
+                    return;
+                }
+
+                if (txtCount < imageFiles.Count)
+                {
+                    var result = MessageBox.Show(
+                        $"警告：部分图片缺少标注文件\n\n图片: {imageFiles.Count}\n标注: {txtCount}\n\n是否继续训练？",
+                        "标注不完整",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Warning
+                    );
+                    
+                    if (result == DialogResult.No)
                     {
-                        MessageBox.Show($"无法生成 classes.txt，请检查是否已标注图片。");
                         return;
                     }
                 }
 
-                if (File.Exists(classesFile))
-                {
-                    if (_useOBBModel)
-                    {
-                        AppendConsole("正在转换 LabelMe JSON 到 YOLO-OBB 格式...");
-                        await Task.Run(() => LabelmeConverter.ConvertFolderToOBB(_currentImageFolder, classesFile));
-                        AppendConsole("OBB 格式转换完成。");
-                    }
-                    else
-                    {
-                        AppendConsole("正在转换 LabelMe JSON 到 YOLO 格式...");
-                        await Task.Run(() => LabelmeConverter.ConvertFolder(_currentImageFolder, classesFile));
-                        AppendConsole("转换完成。");
-                    }
-                }
+                AppendConsole("X-AnyLabeling 标注数据验证通过，准备训练...");
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"转换失败: {ex.Message}");
+                MessageBox.Show($"标注数据验证失败: {ex.Message}");
                 return;
             }
 
@@ -471,7 +517,6 @@ namespace AudioTraining
 
         private void btnLoadModel_Click(object sender, EventArgs e)
         {
-            // Ask user to select model type before loading
             var result = MessageBox.Show(
                 "请选择模型类型：\n\n是(Yes) = OBB旋转模型\n否(No) = 标准YOLO模型",
                 "选择模型类型",
@@ -483,7 +528,7 @@ namespace AudioTraining
                 return;
 
             _useOBBModel = (result == DialogResult.Yes);
-            
+
             using (var ofd = new OpenFileDialog())
             {
                 ofd.Filter = "ONNX Models (*.onnx)|*.onnx|All files (*.*)|*.*";
@@ -491,28 +536,21 @@ namespace AudioTraining
                 {
                     try
                     {
-                        // Try to find classes.txt or something for labels? 
-                        // For now we use generic class indices or try to read data.yaml
-                        
                         string[] labels = null;
-                        // Attempt to load labels from adjacent data.yaml if exists?
-                        // Simple fallback: 0..N
                         
-                        // Load model based on user selection
                         if (_useOBBModel)
                         {
                             _yoloOBBInference.LoadModel(ofd.FileName, labels);
-                            LoggerService.Info($"加载OBB模型: {Path.GetFileName(ofd.FileName)}");
+                            MessageBox.Show($"OBB模型加载成功！\n路径: {ofd.FileName}");
                         }
                         else
                         {
                             _yoloInference.LoadModel(ofd.FileName, labels);
-                            LoggerService.Info($"加载标准YOLO模型: {Path.GetFileName(ofd.FileName)}");
+                            MessageBox.Show($"标准YOLO模型加载成功！\n路径: {ofd.FileName}");
                         }
                         
                         _loadedOnnxPath = ofd.FileName;
                         btnTestImage.Enabled = true;
-                        MessageBox.Show($"模型加载成功！\n类型: {(_useOBBModel ? "OBB旋转模型" : "标准YOLO模型")}");
                     }
                     catch (Exception ex)
                     {
@@ -537,15 +575,6 @@ namespace AudioTraining
 
         private void RunValidation(string imagePath)
         {
-            if (_useOBBModel)
-            {
-                if (!_yoloOBBInference.IsModelLoaded) return;
-            }
-            else
-            {
-                if (!_yoloInference.IsModelLoaded) return;
-            }
-
             try
             {
                 Bitmap bmp = new Bitmap(imagePath);
@@ -555,10 +584,9 @@ namespace AudioTraining
 
                 if (_useOBBModel)
                 {
-                    // OBB Model - use higher threshold for OBB models
-                    var predictions = _yoloOBBInference.Predict(bmp, 0.7f);
-                    
-                    LoggerService.LogInference("OBB", predictions.Count, _yoloOBBInference.TopConfidence);
+                    if (!_yoloOBBInference.IsModelLoaded) return;
+
+                    var predictions = _yoloOBBInference.Predict(bmp, 0.25f);
 
                     using (var g = Graphics.FromImage(drawn))
                     {
@@ -566,13 +594,11 @@ namespace AudioTraining
                         
                         foreach (var pred in predictions)
                         {
-                            // Draw rotated bounding box
                             using (var pen = new Pen(Color.Red, 2))
                             {
                                 g.DrawPolygon(pen, pred.RotatedBox);
                             }
 
-                            // Draw label at first corner
                             string label = $"{pred.Label} {pred.Confidence:F2} ({pred.Angle:F1}°)";
                             using (var brush = new SolidBrush(Color.Red))
                             using (var font = new Font("Arial", 12))
@@ -597,10 +623,9 @@ namespace AudioTraining
                 }
                 else
                 {
-                    // Standard Model
+                    if (!_yoloInference.IsModelLoaded) return;
+
                     var predictions = _yoloInference.Predict(bmp, 0.25f);
-                    
-                    LoggerService.LogInference("Standard", predictions.Count, _yoloInference.TopConfidence);
 
                     using (var g = Graphics.FromImage(drawn))
                     {
@@ -641,8 +666,8 @@ namespace AudioTraining
 
                 picValidPreview.Image?.Dispose();
                 picValidPreview.Image = drawn;
-                
                 bmp.Dispose();
+                
                 txtValidResult.Text = sb.ToString();
             }
             catch (Exception ex)

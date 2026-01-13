@@ -174,9 +174,9 @@
             // 
             this.btnLabelImg.Location = new System.Drawing.Point(150, 15);
             this.btnLabelImg.Name = "btnLabelImg";
-            this.btnLabelImg.Size = new System.Drawing.Size(120, 30);
+            this.btnLabelImg.Size = new System.Drawing.Size(178, 30);
             this.btnLabelImg.TabIndex = 1;
-            this.btnLabelImg.Text = "启动 LabelImg";
+            this.btnLabelImg.Text = "启动 X-AnyLabeling";
             this.btnLabelImg.UseVisualStyleBackColor = true;
             this.btnLabelImg.Click += new System.EventHandler(this.btnLabelImg_Click);
             // 

@@ -150,7 +150,7 @@ namespace AudioTraining.Services
                 }
                 catch (Exception ex)
                 {
-                    LoggerService.Error(ex, $"Failed to convert {jsonFile} to OBB");
+                    Console.WriteLine($"Failed to convert {jsonFile}: {ex.Message}");
                 }
             }
         }
@@ -181,34 +181,31 @@ namespace AudioTraining.Services
                 var points = shape["points"] as JArray;
                 if (points == null || points.Count == 0) continue;
 
-                // OBB format requires exactly 4 points for rotated rectangle
-                // If polygon has 4 points, use them directly
-                // Otherwise, calculate bounding box and convert to 4 corner points
-                string shapeType = shape["shape_type"]?.ToString();
-
-                if (shapeType == "polygon" && points.Count == 4)
+                if (points.Count == 4)
                 {
-                    // Direct 4-point polygon - ideal for OBB
-                    StringBuilder sb = new StringBuilder();
-                    sb.Append(classId);
-
-                    for (int i = 0; i < 4; i++)
+                    var pts = new List<(float x, float y)>();
+                    foreach (var point in points)
                     {
-                        float x = points[i][0].Value<float>() / imgWidth;
-                        float y = points[i][1].Value<float>() / imgHeight;
-                        
-                        // Clamp to [0, 1]
-                        x = Math.Max(0, Math.Min(1, x));
-                        y = Math.Max(0, Math.Min(1, y));
-                        
-                        sb.Append($" {x:F6} {y:F6}");
+                        float x = point[0].Value<float>();
+                        float y = point[1].Value<float>();
+                        pts.Add((x, y));
                     }
 
-                    yoloLines.Add(sb.ToString());
+                    pts = SortPointsClockwise(pts);
+
+                    var normalizedPts = new List<float>();
+                    foreach (var pt in pts)
+                    {
+                        float normX = Math.Max(0, Math.Min(1, pt.x / imgWidth));
+                        float normY = Math.Max(0, Math.Min(1, pt.y / imgHeight));
+                        normalizedPts.Add(normX);
+                        normalizedPts.Add(normY);
+                    }
+
+                    yoloLines.Add($"{classId} {string.Join(" ", normalizedPts.Select(v => v.ToString("F6")))}" );
                 }
                 else
                 {
-                    // For non-4-point shapes, calculate axis-aligned bbox and convert to 4 corners
                     float minX = float.MaxValue, minY = float.MaxValue;
                     float maxX = float.MinValue, maxY = float.MinValue;
 
@@ -223,32 +220,31 @@ namespace AudioTraining.Services
                         if (y > maxY) maxY = y;
                     }
 
-                    // Normalize coordinates
-                    float x1 = minX / imgWidth;
-                    float y1 = minY / imgHeight;
-                    float x2 = maxX / imgWidth;
-                    float y2 = minY / imgHeight;
-                    float x3 = maxX / imgWidth;
-                    float y3 = maxY / imgHeight;
-                    float x4 = minX / imgWidth;
-                    float y4 = maxY / imgHeight;
+                    float normX1 = Math.Max(0, Math.Min(1, minX / imgWidth));
+                    float normY1 = Math.Max(0, Math.Min(1, minY / imgHeight));
+                    float normX2 = Math.Max(0, Math.Min(1, maxX / imgWidth));
+                    float normY2 = Math.Max(0, Math.Min(1, maxY / imgHeight));
 
-                    // Clamp all coordinates
-                    x1 = Math.Max(0, Math.Min(1, x1));
-                    y1 = Math.Max(0, Math.Min(1, y1));
-                    x2 = Math.Max(0, Math.Min(1, x2));
-                    y2 = Math.Max(0, Math.Min(1, y2));
-                    x3 = Math.Max(0, Math.Min(1, x3));
-                    y3 = Math.Max(0, Math.Min(1, y3));
-                    x4 = Math.Max(0, Math.Min(1, x4));
-                    y4 = Math.Max(0, Math.Min(1, y4));
-
-                    yoloLines.Add($"{classId} {x1:F6} {y1:F6} {x2:F6} {y2:F6} {x3:F6} {y3:F6} {x4:F6} {y4:F6}");
+                    yoloLines.Add($"{classId} {normX1:F6} {normY1:F6} {normX2:F6} {normY1:F6} {normX2:F6} {normY2:F6} {normX1:F6} {normY2:F6}");
                 }
             }
 
             string txtPath = Path.ChangeExtension(jsonPath, ".txt");
             File.WriteAllLines(txtPath, yoloLines);
+        }
+
+        private static List<(float x, float y)> SortPointsClockwise(List<(float x, float y)> points)
+        {
+            float centerX = points.Average(p => p.x);
+            float centerY = points.Average(p => p.y);
+
+            var sorted = points.OrderBy(p =>
+            {
+                double angle = Math.Atan2(p.y - centerY, p.x - centerX);
+                return angle;
+            }).ToList();
+
+            return sorted;
         }
     }
 }
