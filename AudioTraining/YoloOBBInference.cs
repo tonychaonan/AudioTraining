@@ -176,8 +176,16 @@ namespace AudioTraining
 
                 for (int c = 0; c < numClasses; c++)
                 {
-                    float rawScore = output[0, 5 + c, i];  // Channels 5+ are class scores (raw logits)
-                    float score = Sigmoid(rawScore);  // Apply sigmoid to convert to probability
+                    float score = output[0, 5 + c, i];
+                    
+                    // 诊断：打印前10个锚点的原始分数
+                    if (i < 10 && c == 0)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[OBB诊断] 锚点{i} 原始分数: {score:F4}");
+                    }
+                    
+                    // 如果模型已包含Sigmoid，直接使用原始输出
+                    // float score = Sigmoid(rawScore);
 
                     if (score > maxClassScore)
                     {
@@ -187,29 +195,6 @@ namespace AudioTraining
                 }
 
                 if (maxClassScore > globalMaxScore) globalMaxScore = maxClassScore;
-
-                // Log first 10 detections with raw values
-                if (i < 10)
-                {
-                    float[] rawScores = new float[numClasses];
-                    float[] sigmoidScores = new float[numClasses];
-                    for (int c = 0; c < numClasses; c++)
-                    {
-                        rawScores[c] = output[0, 5 + c, i];
-                        sigmoidScores[c] = Sigmoid(rawScores[c]);
-                    }
-                    
-                    // Log raw box coordinates too
-                    float rawCx = output[0, 0, i];
-                    float rawCy = output[0, 1, i];
-                    float rawW = output[0, 2, i];
-                    float rawH = output[0, 3, i];
-                    float rawAngle = output[0, 4, i];
-                    
-                    LoggerService.Debug($"【锚点{i}详细】原始分数=[{string.Join(", ", Array.ConvertAll(rawScores, s => s.ToString("F4")))}], Sigmoid后=[{string.Join(", ", Array.ConvertAll(sigmoidScores, s => s.ToString("F4")))}]");
-                    LoggerService.Debug($"【锚点{i}坐标】cx={rawCx:F2}, cy={rawCy:F2}, w={rawW:F2}, h={rawH:F2}, angle={rawAngle:F4}");
-                }
-
                 if (maxClassScore < confThreshold) continue;
                 
                 validCount++;
@@ -249,25 +234,6 @@ namespace AudioTraining
             }
 
             TopConfidence = globalMaxScore;
-            
-            // 统计分析：检查模型输出的分布
-            int countAbove08 = 0;
-            int countAbove06 = 0;
-            int countAbove05 = 0;
-            for (int i = 0; i < Math.Min(1000, numAnchors); i++)
-            {
-                for (int c = 0; c < numClasses; c++)
-                {
-                    float score = Sigmoid(output[0, 5 + c, i]);
-                    if (score > 0.8f) countAbove08++;
-                    if (score > 0.6f) countAbove06++;
-                    if (score > 0.5f) countAbove05++;
-                }
-            }
-            
-            LoggerService.Info($"OBB推理完成: 通过阈值={validCount}, 验证后={predictions.Count}, 最高置信度={globalMaxScore:F4}");
-            LoggerService.Info($"【统计分析】前1000个锚点中: >0.8={countAbove08}, >0.6={countAbove06}, >0.5={countAbove05}");
-
             return NMS(predictions);
         }
 

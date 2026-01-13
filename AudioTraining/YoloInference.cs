@@ -46,7 +46,7 @@ namespace AudioTraining
 
         public float TopConfidence { get; private set; }
 
-        public List<YoloPrediction> Predict(Bitmap image, float confidenceThreshold = 0.5f)
+        public List<YoloPrediction> Predict(Bitmap image, float confidenceThreshold = 0.3f)
         {
             TopConfidence = 0f;
             if (_inferenceSession == null) throw new InvalidOperationException("Model not loaded.");

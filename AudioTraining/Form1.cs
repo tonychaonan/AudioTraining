@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Windows.Forms.DataVisualization.Charting;
 using AudioTraining.Services;
+using Newtonsoft.Json.Linq;
 
 namespace AudioTraining
 {
@@ -327,6 +328,11 @@ namespace AudioTraining
             int epochs = (int)numEpochs.Value;
             int batch = (int)numBatchSize.Value;
 
+            // 【关键】从UI读取模型类型
+            _useOBBModel = (cmbModelType.SelectedIndex == 1); // 0=Standard, 1=OBB
+            AppendConsole($"模型类型: {(_useOBBModel ? "旋转检测 (OBB)" : "标准检测 (Standard)")}");
+            LoggerService.Info($"模型类型: {(_useOBBModel ? "旋转检测 (OBB)" : "标准检测 (Standard)")}");
+
             // Setup output directory
             _currentTrainProject = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runs", "detect");
             // Python script handles its own output structure usually, but we pass project path to it or let it use default.
@@ -551,6 +557,7 @@ namespace AudioTraining
                         
                         _loadedOnnxPath = ofd.FileName;
                         btnTestImage.Enabled = true;
+                        btnCSharpTest.Enabled = true;
                     }
                     catch (Exception ex)
                     {
@@ -573,6 +580,24 @@ namespace AudioTraining
             }
         }
 
+        private void btnCSharpTest_Click(object sender, EventArgs e)
+        {
+            if (!_yoloInference.IsModelLoaded && !_yoloOBBInference.IsModelLoaded)
+            {
+                MessageBox.Show("请先加载模型！");
+                return;
+            }
+
+            using (OpenFileDialog ofd = new OpenFileDialog())
+            {
+                ofd.Filter = "Image Files|*.jpg;*.jpeg;*.png;*.bmp";
+                if (ofd.ShowDialog() == DialogResult.OK)
+                {
+                    RunCSharpValidation(ofd.FileName);
+                }
+            }
+        }
+
         private void RunValidation(string imagePath)
         {
             try
@@ -582,85 +607,54 @@ namespace AudioTraining
                 StringBuilder sb = new StringBuilder();
                 sb.AppendLine($"Image: {Path.GetFileName(imagePath)}");
 
-                if (_useOBBModel)
+                // 使用Python推理（推荐用于训练验证）
+                var predictions = PredictWithPython(imagePath, 0.25f, _useOBBModel);
+
+                // 绘制检测结果（统一处理OBB和标准检测）
+                using (var g = Graphics.FromImage(drawn))
                 {
-                    if (!_yoloOBBInference.IsModelLoaded) return;
-
-                    var predictions = _yoloOBBInference.Predict(bmp, 0.25f);
-
-                    using (var g = Graphics.FromImage(drawn))
-                    {
-                        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                        
-                        foreach (var pred in predictions)
-                        {
-                            using (var pen = new Pen(Color.Red, 2))
-                            {
-                                g.DrawPolygon(pen, pred.RotatedBox);
-                            }
-
-                            string label = $"{pred.Label} {pred.Confidence:F2} ({pred.Angle:F1}°)";
-                            using (var brush = new SolidBrush(Color.Red))
-                            using (var font = new Font("Arial", 12))
-                            {
-                                g.DrawString(label, font, brush, pred.RotatedBox[0].X, pred.RotatedBox[0].Y - 20);
-                            }
-                        }
-                    }
-
-                    sb.AppendLine($"Count: {predictions.Count}");
-                    sb.AppendLine($"Max Confidence: {_yoloOBBInference.TopConfidence:F4}");
+                    g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
                     
-                    if (predictions.Count == 0 && _yoloOBBInference.TopConfidence > 0)
+                    foreach (var pred in predictions)
                     {
-                        sb.AppendLine("(Try lowering threshold if Max Confidence is reasonable)");
-                    }
+                        // 绘制边界框（多边形，支持旋转框和矩形）
+                        using (var pen = new Pen(Color.Red, 2))
+                        {
+                            g.DrawPolygon(pen, pred.RotatedBox);
+                        }
 
-                    foreach (var p in predictions)
-                    {
-                        sb.AppendLine($"Class: {p.ClassId}, Conf: {p.Confidence:F2}, Angle: {p.Angle:F1}°");
+                        // 绘制标签
+                        string label = _useOBBModel 
+                            ? $"{pred.Label} {pred.Confidence:F2} ({pred.Angle:F1}°)"
+                            : $"{pred.Label} {pred.Confidence:F2}";
+                        
+                        using (var brush = new SolidBrush(Color.Red))
+                        using (var font = new Font("Arial", 12))
+                        {
+                            g.DrawString(label, font, brush, pred.RotatedBox[0].X, pred.RotatedBox[0].Y - 20);
+                        }
                     }
                 }
-                else
+
+                // 显示统计信息
+                sb.AppendLine($"推理方式: Python (Ultralytics)");
+                sb.AppendLine($"检测数量: {predictions.Count}");
+                
+                if (predictions.Count > 0)
                 {
-                    if (!_yoloInference.IsModelLoaded) return;
+                    float maxConf = predictions.Max(p => p.Confidence);
+                    sb.AppendLine($"最高置信度: {maxConf:F4}");
+                }
 
-                    var predictions = _yoloInference.Predict(bmp, 0.25f);
-
-                    using (var g = Graphics.FromImage(drawn))
+                foreach (var p in predictions)
+                {
+                    if (_useOBBModel)
                     {
-                        foreach (var pred in predictions)
-                        {
-                            float x = pred.Rectangle.X;
-                            float y = pred.Rectangle.Y;
-                            float w = pred.Rectangle.Width;
-                            float h = pred.Rectangle.Height;
-
-                            using (var pen = new Pen(Color.Red, 2))
-                            {
-                                g.DrawRectangle(pen, x, y, w, h);
-                            }
-
-                            string label = $"{pred.Label} {pred.Confidence:F2}";
-                            using (var brush = new SolidBrush(Color.Red))
-                            using (var font = new Font("Arial", 12))
-                            {
-                                g.DrawString(label, font, brush, x, y - 20);
-                            }
-                        }
+                        sb.AppendLine($"类别: {p.ClassId}, 置信度: {p.Confidence:F2}, 角度: {p.Angle:F1}°");
                     }
-
-                    sb.AppendLine($"Count: {predictions.Count}");
-                    sb.AppendLine($"Max Confidence: {_yoloInference.TopConfidence:F4}");
-                    
-                    if (predictions.Count == 0 && _yoloInference.TopConfidence > 0)
+                    else
                     {
-                        sb.AppendLine("(Try lowering threshold if Max Confidence is reasonable)");
-                    }
-
-                    foreach (var p in predictions)
-                    {
-                        sb.AppendLine($"Class: {p.ClassId}, Conf: {p.Confidence:F2}, Rect: {p.Rectangle}");
+                        sb.AppendLine($"类别: {p.ClassId}, 置信度: {p.Confidence:F2}");
                     }
                 }
 
@@ -674,6 +668,332 @@ namespace AudioTraining
             {
                 MessageBox.Show($"推理失败: {ex.Message}");
             }
+        }
+
+        private void RunCSharpValidation(string imagePath)
+        {
+            try
+            {
+                Bitmap bmp = new Bitmap(imagePath);
+                Bitmap drawn = new Bitmap(bmp);
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine($"Image: {Path.GetFileName(imagePath)}");
+
+                List<YoloOBBPrediction> predictions = new List<YoloOBBPrediction>();
+
+                // 使用C#推理（ONNX Runtime）
+                if (_useOBBModel)
+                {
+                    if (!_yoloOBBInference.IsModelLoaded)
+                    {
+                        MessageBox.Show("请先加载OBB模型！");
+                        return;
+                    }
+                    predictions = _yoloOBBInference.Predict(bmp, 0.25f);
+                }
+                else
+                {
+                    if (!_yoloInference.IsModelLoaded)
+                    {
+                        MessageBox.Show("请先加载模型！");
+                        return;
+                    }
+                    var stdPredictions = _yoloInference.Predict(bmp, 0.25f);
+                    
+                    // 转换为统一格式
+                    foreach (var pred in stdPredictions)
+                    {
+                        var corners = new PointF[4]
+                        {
+                            new PointF(pred.Rectangle.Left, pred.Rectangle.Top),
+                            new PointF(pred.Rectangle.Right, pred.Rectangle.Top),
+                            new PointF(pred.Rectangle.Right, pred.Rectangle.Bottom),
+                            new PointF(pred.Rectangle.Left, pred.Rectangle.Bottom)
+                        };
+                        
+                        predictions.Add(new YoloOBBPrediction
+                        {
+                            ClassId = pred.ClassId,
+                            Label = pred.Label,
+                            Confidence = pred.Confidence,
+                            RotatedBox = corners,
+                            Angle = 0
+                        });
+                    }
+                }
+
+                // 绘制检测结果
+                using (var g = Graphics.FromImage(drawn))
+                {
+                    g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                    
+                    foreach (var pred in predictions)
+                    {
+                        // 绘制边界框（多边形，支持旋转框和矩形）
+                        using (var pen = new Pen(Color.Blue, 2))  // 使用蓝色区分C#推理
+                        {
+                            g.DrawPolygon(pen, pred.RotatedBox);
+                        }
+
+                        // 绘制标签
+                        string label = _useOBBModel 
+                            ? $"{pred.Label} {pred.Confidence:F2} ({pred.Angle:F1}°)"
+                            : $"{pred.Label} {pred.Confidence:F2}";
+                        
+                        using (var brush = new SolidBrush(Color.Blue))
+                        using (var font = new Font("Arial", 12))
+                        {
+                            g.DrawString(label, font, brush, pred.RotatedBox[0].X, pred.RotatedBox[0].Y - 20);
+                        }
+                    }
+                }
+
+                // 显示统计信息
+                sb.AppendLine($"推理方式: C# (ONNX Runtime)");
+                sb.AppendLine($"检测数量: {predictions.Count}");
+                
+                if (predictions.Count > 0)
+                {
+                    float maxConf = predictions.Max(p => p.Confidence);
+                    sb.AppendLine($"最高置信度: {maxConf:F4}");
+                }
+
+                foreach (var p in predictions)
+                {
+                    if (_useOBBModel)
+                    {
+                        sb.AppendLine($"类别: {p.ClassId}, 置信度: {p.Confidence:F2}, 角度: {p.Angle:F1}°");
+                    }
+                    else
+                    {
+                        sb.AppendLine($"类别: {p.ClassId}, 置信度: {p.Confidence:F2}");
+                    }
+                }
+
+                picValidPreview.Image?.Dispose();
+                picValidPreview.Image = drawn;
+                bmp.Dispose();
+                
+                txtValidResult.Text = sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"C#推理失败: {ex.Message}\n{ex.StackTrace}");
+            }
+        }
+
+        // Python推理方法（用于训练验证）
+        private List<YoloOBBPrediction> PredictWithPython(string imagePath, float confThreshold, bool isOBB)
+        {
+            var predictions = new List<YoloOBBPrediction>();
+            
+            try
+            {
+                string pythonPath = txtPythonPath.Text;
+                if (string.IsNullOrWhiteSpace(pythonPath) || !File.Exists(pythonPath))
+                {
+                    pythonPath = "python"; // 使用系统Python
+                }
+                
+                string scriptPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Scripts", "inference_wrapper.py");
+                string modelPath = _loadedOnnxPath;
+                
+                // 如果加载的是ONNX，尝试找对应的.pt文件
+                if (modelPath.EndsWith(".onnx"))
+                {
+                    string ptPath = modelPath.Replace(".onnx", ".pt");
+                    if (File.Exists(ptPath))
+                    {
+                        modelPath = ptPath; // 优先使用.pt文件
+                    }
+                }
+                
+                string modelType = isOBB ? "obb" : "detect";
+                string args = $"\"{scriptPath}\" \"{modelPath}\" \"{imagePath}\" {confThreshold} {modelType}";
+                
+                var psi = new ProcessStartInfo
+                {
+                    FileName = pythonPath,
+                    Arguments = args,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+                
+                using (var process = Process.Start(psi))
+                {
+                    string output = process.StandardOutput.ReadToEnd();
+                    string error = process.StandardError.ReadToEnd();
+                    process.WaitForExit();
+                    
+                    if (!string.IsNullOrWhiteSpace(error))
+                    {
+                        LoggerService.Error($"Python推理错误: {error}");
+                    }
+                    
+                    if (string.IsNullOrWhiteSpace(output))
+                    {
+                        LoggerService.Error("Python推理无输出");
+                        return predictions;
+                    }
+                    
+                    // 解析JSON结果
+                    var json = JObject.Parse(output);
+                    
+                    if (json["success"]?.Value<bool>() == false)
+                    {
+                        string errorMsg = json["error"]?.Value<string>() ?? "Unknown error";
+                        LoggerService.Error($"Python推理失败: {errorMsg}");
+                        return predictions;
+                    }
+                    
+                    var predArray = json["predictions"] as JArray;
+                    if (predArray == null) return predictions;
+                    
+                    foreach (var pred in predArray)
+                    {
+                        string type = pred["type"]?.Value<string>();
+                        int classId = pred["class_id"]?.Value<int>() ?? 0;
+                        float confidence = pred["confidence"]?.Value<float>() ?? 0;
+
+                        /* 后面测试需要，保留这段代码
+                        if (type == "obb")
+                        {
+                            var points = pred["points"]?.Values<float>().ToArray();
+                            if (points != null && points.Length == 8)
+                            {
+                                var corners = new PointF[4];
+                                for (int i = 0; i < 4; i++)
+                                {
+                                    corners[i] = new PointF(points[i * 2], points[i * 2 + 1]);
+                                }
+
+                                // 从4个角点计算角度（与标注一致）
+                                float angle = CalculateOBBAngleFromCorners(corners);
+
+                                predictions.Add(new YoloOBBPrediction
+                                {
+                                    ClassId = classId,
+                                    Label = classId.ToString(),
+                                    Confidence = confidence,
+                                    RotatedBox = corners,
+                                    Angle = angle
+                                });
+                            }
+                        } */
+                        if (type == "obb")
+                        {
+                            var points = pred["points"]?.Values<float>().ToArray();
+                            if (points != null && points.Length == 8)
+                            {
+                                var corners = new PointF[4];
+                                for (int i = 0; i < 4; i++)
+                                {
+                                    corners[i] = new PointF(points[i * 2], points[i * 2 + 1]);
+                                }
+
+                                // 使用Python返回的模型角度（如果有）
+                                float angle = pred["angle"]?.Value<float>() ?? 0;
+
+                                predictions.Add(new YoloOBBPrediction
+                                {
+                                    ClassId = classId,
+                                    Label = classId.ToString(),
+                                    Confidence = confidence,
+                                    RotatedBox = corners,
+                                    Angle = angle  // 使用模型输出的角度
+                                });
+                            }
+                        }
+                        else if (type == "detect")
+                        {
+                            // 标准检测: [x1, y1, x2, y2]
+                            var box = pred["box"]?.Values<float>().ToArray();
+                            if (box != null && box.Length == 4)
+                            {
+                                // 转换为4个角点（矩形）
+                                var corners = new PointF[4]
+                                {
+                                    new PointF(box[0], box[1]), // 左上
+                                    new PointF(box[2], box[1]), // 右上
+                                    new PointF(box[2], box[3]), // 右下
+                                    new PointF(box[0], box[3])  // 左下
+                                };
+                                
+                                predictions.Add(new YoloOBBPrediction
+                                {
+                                    ClassId = classId,
+                                    Label = classId.ToString(),
+                                    Confidence = confidence,
+                                    RotatedBox = corners,
+                                    Angle = 0
+                                });
+                            }
+                        }
+                    }
+                    
+                    LoggerService.Info($"Python推理完成: 检测到 {predictions.Count} 个目标");
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggerService.Error($"Python推理异常: {ex.Message}");
+            }
+            
+            return predictions;
+        }
+
+        /// <summary>
+        /// 从OBB的4个角点计算旋转角度（与标注一致的角度）
+        /// </summary>
+        /// <param name="corners">4个角点坐标</param>
+        /// <returns>旋转角度（度）</returns>
+        private float CalculateOBBAngleFromCorners(PointF[] corners)
+        {
+            if (corners == null || corners.Length != 4)
+                return 0;
+            // 方法1：找出最左上的角点作为起始点
+            // 使用 x + y 最小的点作为"左上角"
+            int topLeftIdx = 0;
+            float minSum = corners[0].X + corners[0].Y;
+
+            for (int i = 1; i < 4; i++)
+            {
+                float sum = corners[i].X + corners[i].Y;
+                if (sum < minSum)
+                {
+                    minSum = sum;
+                    topLeftIdx = i;
+                }
+            }
+
+            // 找到距离最左上角点最近的相邻点
+            PointF topLeft = corners[topLeftIdx];
+            float minDist = float.MaxValue;
+            int nextIdx = 0;
+
+            for (int i = 0; i < 4; i++)
+            {
+                if (i == topLeftIdx) continue;
+
+                float dx = corners[i].X - topLeft.X;
+                float dy = corners[i].Y - topLeft.Y;
+                float dist = (float)Math.Sqrt(dx * dx + dy * dy);
+
+                if (dist < minDist)
+                {
+                    minDist = dist;
+                    nextIdx = i;
+                }
+            }
+
+            // 计算从topLeft到next的角度
+            float deltaX = corners[nextIdx].X - topLeft.X;
+            float deltaY = corners[nextIdx].Y - topLeft.Y;
+            float angle = (float)(Math.Atan2(deltaY, deltaX) * 180.0 / Math.PI);
+
+            return angle;
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)

@@ -52,9 +52,9 @@
             this.numEpochs = new System.Windows.Forms.NumericUpDown();
             this.label1 = new System.Windows.Forms.Label();
             this.grpModel = new System.Windows.Forms.GroupBox();
-            this.cmbModelSize = new System.Windows.Forms.ComboBox();
             this.cmbModelType = new System.Windows.Forms.ComboBox();
             this.labelModelType = new System.Windows.Forms.Label();
+            this.cmbModelSize = new System.Windows.Forms.ComboBox();
             this.label3 = new System.Windows.Forms.Label();
             this.tabTrain = new System.Windows.Forms.TabPage();
             this.tableLayoutPanelTrain = new System.Windows.Forms.TableLayoutPanel();
@@ -68,6 +68,7 @@
             this.picValidPreview = new System.Windows.Forms.PictureBox();
             this.txtValidResult = new System.Windows.Forms.TextBox();
             this.panelValidTop = new System.Windows.Forms.Panel();
+            this.btnCSharpTest = new System.Windows.Forms.Button();
             this.btnTestImage = new System.Windows.Forms.Button();
             this.btnLoadModel = new System.Windows.Forms.Button();
             this.tabControl1.SuspendLayout();
@@ -350,19 +351,6 @@
             this.grpModel.TabStop = false;
             this.grpModel.Text = "模型选择";
             // 
-            // cmbModelSize
-            // 
-            this.cmbModelSize.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.cmbModelSize.FormattingEnabled = true;
-            this.cmbModelSize.Items.AddRange(new object[] {
-            "n (Nano)",
-            "s (Small)",
-            "m (Medium)"});
-            this.cmbModelSize.Location = new System.Drawing.Point(110, 30);
-            this.cmbModelSize.Name = "cmbModelSize";
-            this.cmbModelSize.Size = new System.Drawing.Size(120, 23);
-            this.cmbModelSize.TabIndex = 1;
-            // 
             // cmbModelType
             // 
             this.cmbModelType.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
@@ -383,6 +371,19 @@
             this.labelModelType.Size = new System.Drawing.Size(75, 15);
             this.labelModelType.TabIndex = 2;
             this.labelModelType.Text = "模型类型:";
+            // 
+            // cmbModelSize
+            // 
+            this.cmbModelSize.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbModelSize.FormattingEnabled = true;
+            this.cmbModelSize.Items.AddRange(new object[] {
+            "n (Nano)",
+            "s (Small)",
+            "m (Medium)"});
+            this.cmbModelSize.Location = new System.Drawing.Point(110, 30);
+            this.cmbModelSize.Name = "cmbModelSize";
+            this.cmbModelSize.Size = new System.Drawing.Size(120, 23);
+            this.cmbModelSize.TabIndex = 1;
             // 
             // label3
             // 
@@ -532,6 +533,7 @@
             // 
             // panelValidTop
             // 
+            this.panelValidTop.Controls.Add(this.btnCSharpTest);
             this.panelValidTop.Controls.Add(this.btnTestImage);
             this.panelValidTop.Controls.Add(this.btnLoadModel);
             this.panelValidTop.Dock = System.Windows.Forms.DockStyle.Top;
@@ -540,14 +542,25 @@
             this.panelValidTop.Size = new System.Drawing.Size(976, 60);
             this.panelValidTop.TabIndex = 0;
             // 
+            // btnCSharpTest
+            // 
+            this.btnCSharpTest.Enabled = false;
+            this.btnCSharpTest.Location = new System.Drawing.Point(295, 15);
+            this.btnCSharpTest.Name = "btnCSharpTest";
+            this.btnCSharpTest.Size = new System.Drawing.Size(120, 30);
+            this.btnCSharpTest.TabIndex = 2;
+            this.btnCSharpTest.Text = "C#推理测试";
+            this.btnCSharpTest.UseVisualStyleBackColor = true;
+            this.btnCSharpTest.Click += new System.EventHandler(this.btnCSharpTest_Click);
+            // 
             // btnTestImage
             // 
             this.btnTestImage.Enabled = false;
-            this.btnTestImage.Location = new System.Drawing.Point(150, 15);
+            this.btnTestImage.Location = new System.Drawing.Point(154, 15);
             this.btnTestImage.Name = "btnTestImage";
-            this.btnTestImage.Size = new System.Drawing.Size(120, 30);
+            this.btnTestImage.Size = new System.Drawing.Size(126, 30);
             this.btnTestImage.TabIndex = 1;
-            this.btnTestImage.Text = "加载测试图片";
+            this.btnTestImage.Text = "Python推理测试";
             this.btnTestImage.UseVisualStyleBackColor = true;
             this.btnTestImage.Click += new System.EventHandler(this.btnTestImage_Click);
             // 
@@ -635,6 +648,7 @@
         private System.Windows.Forms.Panel panelValidTop;
         private System.Windows.Forms.Button btnTestImage;
         private System.Windows.Forms.Button btnLoadModel;
+        private System.Windows.Forms.Button btnCSharpTest;
         private System.Windows.Forms.Button btnBrowseDataYaml;
         private System.Windows.Forms.TextBox txtDataYaml;
         private System.Windows.Forms.Label label4;
