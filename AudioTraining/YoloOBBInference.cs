@@ -6,6 +6,8 @@ using System.Linq;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using AudioTraining.Services;
+using OpenCvSharp;
+using OpenCvSharp.Dnn;
 
 namespace AudioTraining
 {
@@ -48,249 +50,224 @@ namespace AudioTraining
 
         public float TopConfidence { get; private set; }
 
-        public List<YoloOBBPrediction> Predict(Bitmap image, float confidenceThreshold = 0.5f)
+        public List<YoloOBBPrediction> Predict(Bitmap image, float confThreshold = 0.25f, float iouThreshold = 0.45f)
         {
-            TopConfidence = 0f;
-            if (_inferenceSession == null) throw new InvalidOperationException("Model not loaded.");
+            if (_inferenceSession == null)
+            {
+                throw new InvalidOperationException("Model not loaded. Call LoadModel first.");
+            }
 
-            var (tensor, scale, xPadding, yPadding) = Preprocess(image);
+            // 转换Bitmap到OpenCvSharp Mat
+            Mat mat = BitmapToMat(image);
+
+            // 1. Letterbox预处理（与Python Ultralytics一致）
+            Mat inputMat = Letterbox(mat, new OpenCvSharp.Size(_targetSize, _targetSize), out float ratio, out float dw, out float dh);
+
+            // 2. Mat转Tensor
+            var inputTensor = MatToTensor(inputMat);
+
+            // 3. 推理
             var inputs = new List<NamedOnnxValue>
             {
-                NamedOnnxValue.CreateFromTensor("images", tensor)
+                NamedOnnxValue.CreateFromTensor(_inferenceSession.InputMetadata.Keys.First(), inputTensor)
             };
 
+            List<YoloOBBPrediction> predictions;
             using (var results = _inferenceSession.Run(inputs))
             {
                 var output = results.First().AsTensor<float>();
-                return Postprocess(output, image.Width, image.Height, scale, xPadding, yPadding, confidenceThreshold);
+                // 4. 后处理（使用OpenCvSharp的NMSBoxesRotated）
+                predictions = PostprocessWithOpenCV(output, ratio, dw, dh, confThreshold, iouThreshold);
             }
+
+            mat.Dispose();
+            inputMat.Dispose();
+
+            return predictions;
         }
 
-        private (DenseTensor<float> Tensor, float Scale, float XPadding, float YPadding) Preprocess(Bitmap image)
+        // 转换Bitmap到OpenCvSharp Mat
+        private Mat BitmapToMat(Bitmap bitmap)
         {
-            int w = image.Width;
-            int h = image.Height;
+            // 使用OpenCvSharp的扩展方法
+            return OpenCvSharp.Extensions.BitmapConverter.ToMat(bitmap);
+        }
 
-            float scale = Math.Min((float)_targetSize / w, (float)_targetSize / h);
-            int newWidth = (int)(w * scale);
-            int newHeight = (int)(h * scale);
+        // Letterbox预处理（与Python Ultralytics一致）
+        private Mat Letterbox(Mat img, OpenCvSharp.Size newShape, out float ratio, out float dw, out float dh)
+        {
+            var shape = img.Size();
+            float r = Math.Min((float)newShape.Width / shape.Width, (float)newShape.Height / shape.Height);
 
-            int xPadding = (_targetSize - newWidth) / 2;
-            int yPadding = (_targetSize - newHeight) / 2;
+            // 不进行upscale
+            if (r > 1f) r = 1f;
 
-            var tensor = new DenseTensor<float>(new[] { 1, 3, _targetSize, _targetSize });
+            int newUnpadW = (int)Math.Round(shape.Width * r);
+            int newUnpadH = (int)Math.Round(shape.Height * r);
 
-            using (var resized = new Bitmap(_targetSize, _targetSize, PixelFormat.Format24bppRgb))
-            using (var g = Graphics.FromImage(resized))
+            dw = (newShape.Width - newUnpadW) / 2f;
+            dh = (newShape.Height - newUnpadH) / 2f;
+
+            ratio = r;
+
+            Mat resized = new Mat();
+            Cv2.Resize(img, resized, new OpenCvSharp.Size(newUnpadW, newUnpadH));
+
+            Mat bordered = new Mat();
+            // 填充灰色边框 (114, 114, 114)
+            Cv2.CopyMakeBorder(resized, bordered, 
+                (int)Math.Floor(dh), (int)Math.Ceiling(dh), 
+                (int)Math.Floor(dw), (int)Math.Ceiling(dw), 
+                BorderTypes.Constant, new Scalar(114, 114, 114));
+
+            resized.Dispose();
+            return bordered;
+        }
+
+        // Mat转Tensor
+        private DenseTensor<float> MatToTensor(Mat mat)
+        {
+            var tensor = new DenseTensor<float>(new[] { 1, 3, mat.Height, mat.Width });
+
+            // 转换颜色空间 BGR -> RGB
+            Mat rgb = new Mat();
+            Cv2.CvtColor(mat, rgb, ColorConversionCodes.BGR2RGB);
+
+            // 归一化并填充Tensor (NCHW格式)
+            Mat[] channels = Cv2.Split(rgb);
+            
+            for (int c = 0; c < 3; c++)
             {
-                g.Clear(Color.FromArgb(114, 114, 114));
-                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Bicubic;
-                g.DrawImage(image, xPadding, yPadding, newWidth, newHeight);
-
-                var data = resized.LockBits(new Rectangle(0, 0, _targetSize, _targetSize), ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
-
-                try
+                var indexer = channels[c].GetGenericIndexer<byte>();
+                for (int y = 0; y < mat.Height; y++)
                 {
-                    unsafe
+                    for (int x = 0; x < mat.Width; x++)
                     {
-                        byte* ptr = (byte*)data.Scan0;
-                        int stride = data.Stride;
-
-                        for (int y = 0; y < _targetSize; y++)
-                        {
-                            for (int x = 0; x < _targetSize; x++)
-                            {
-                                int offset = y * stride + x * 3;
-                                tensor[0, 0, y, x] = ptr[offset + 2] / 255.0f; // R
-                                tensor[0, 1, y, x] = ptr[offset + 1] / 255.0f; // G
-                                tensor[0, 2, y, x] = ptr[offset + 0] / 255.0f; // B
-                            }
-                        }
+                        tensor[0, c, y, x] = indexer[y, x] / 255.0f;
                     }
                 }
-                finally
-                {
-                    resized.UnlockBits(data);
-                }
+                channels[c].Dispose();
             }
 
-            return (tensor, scale, xPadding, yPadding);
+            rgb.Dispose();
+            return tensor;
         }
 
-        private List<YoloOBBPrediction> Postprocess(Tensor<float> output, int originalW, int originalH, float scale, float xPad, float yPad, float confThreshold)
+        // 使用OpenCvSharp的NMSBoxesRotated进行后处理
+        private List<YoloOBBPrediction> PostprocessWithOpenCV(Tensor<float> output, float ratio, float dw, float dh, float confThreshold, float iouThreshold)
         {
-            var predictions = new List<YoloOBBPrediction>();
+            var results = new List<YoloOBBPrediction>();
 
-            // YOLOv8-OBB output shape: [1, 5+classes, 8400]
-            // Channels 0-3: cx, cy, w, h (box coordinates)
-            // Channel 4: angle (rotation angle in radians)
-            // Channels 5+: class confidence scores
+            // YOLOv8-OBB输出: [1, 5+classes, 8400]
+            // Channels: 0-3=xywh, 4=angle, 5+=class_scores
+            int dimensions = output.Dimensions[1];
+            int rows = output.Dimensions[2]; // 8400 anchors
+            int numClasses = dimensions - 5;
 
-            int dim1 = output.Dimensions[1];
-            int dim2 = output.Dimensions[2];
+            LoggerService.Debug($"[OBB后处理OpenCV] 输出形状: [{output.Dimensions[0]}, {dimensions}, {rows}], 类别数: {numClasses}");
 
-            LoggerService.LogOBBInference(
-                new int[] { output.Dimensions[0], dim1, dim2 },
-                dim1 - 5,
-                dim2,
-                confThreshold
-            );
-            
-            // 诊断：检查输出张量的值范围
-            float minVal = float.MaxValue;
-            float maxVal = float.MinValue;
-            float sumVal = 0;
-            int sampleCount = 0;
-            for (int i = 0; i < Math.Min(100, dim2); i++)
+            var rects = new List<RotatedRect>();
+            var scores = new List<float>();
+            var classIds = new List<int>();
+
+            for (int i = 0; i < rows; i++)
             {
-                for (int c = 5; c < dim1; c++)
-                {
-                    float val = output[0, c, i];
-                    if (val < minVal) minVal = val;
-                    if (val > maxVal) maxVal = val;
-                    sumVal += val;
-                    sampleCount++;
-                }
-            }
-            float avgVal = sumVal / sampleCount;
-            LoggerService.Debug($"【模型输出诊断】前100个锚点的类别分数: 最小={minVal:F4}, 最大={maxVal:F4}, 平均={avgVal:F4}");
-
-            // YOLOv8-OBB format is always [1, 5+classes, anchors]
-            int numClasses = dim1 - 5;  // Total channels minus 5 (4 coords + 1 angle)
-            int numAnchors = dim2;
-
-            if (numClasses < 1) 
-            {
-                LoggerService.Warn($"OBB推理失败: 类别数无效 (numClasses={numClasses})");
-                return predictions;
-            }
-
-            float globalMaxScore = 0f;
-            int validCount = 0;
-
-            for (int i = 0; i < numAnchors; i++)
-            {
-                // Find best class from channels 5 onwards
-                float maxClassScore = 0;
+                // 找出最高置信度的类别
+                float maxScore = 0;
                 int maxClassId = -1;
 
                 for (int c = 0; c < numClasses; c++)
                 {
-                    float score = output[0, 5 + c, i];
-                    
-                    // 诊断：打印前10个锚点的原始分数
-                    if (i < 10 && c == 0)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"[OBB诊断] 锚点{i} 原始分数: {score:F4}");
-                    }
-                    
-                    // 如果模型已包含Sigmoid，直接使用原始输出
-                    // float score = Sigmoid(rawScore);
+                    float rawScore = output[0, 5 + c, i];
+                    // 应用Sigmoid
+                    float score = Sigmoid(rawScore);
 
-                    if (score > maxClassScore)
+                    if (score > maxScore)
                     {
-                        maxClassScore = score;
+                        maxScore = score;
                         maxClassId = c;
                     }
                 }
 
-                if (maxClassScore > globalMaxScore) globalMaxScore = maxClassScore;
-                if (maxClassScore < confThreshold) continue;
-                
-                validCount++;
-
-                // Extract box parameters from channels 0-4
-                float cx = output[0, 0, i];      // Channel 0: center x
-                float cy = output[0, 1, i];      // Channel 1: center y
-                float w = output[0, 2, i];       // Channel 2: width
-                float h = output[0, 3, i];       // Channel 3: height
-                float angle = output[0, 4, i];   // Channel 4: angle in radians
-
-                // Convert to original image coordinates
-                cx = (cx - xPad) / scale;
-                cy = (cy - yPad) / scale;
-                w = w / scale;
-                h = h / scale;
-
-                // CRITICAL FIX: Validate box dimensions to filter out invalid detections
-                if (w <= 0 || h <= 0 || w > originalW * 2 || h > originalH * 2)
-                    continue;
-
-                // Additional validation: check if box is within reasonable bounds
-                if (cx < -originalW || cx > originalW * 2 || cy < -originalH || cy > originalH * 2)
-                    continue;
-
-                // Calculate 4 corner points of rotated rectangle
-                PointF[] corners = CalculateRotatedCorners(cx, cy, w, h, angle);
-
-                predictions.Add(new YoloOBBPrediction
+                if (maxScore > confThreshold)
                 {
-                    ClassId = maxClassId,
-                    Label = _labels != null && maxClassId < _labels.Length ? _labels[maxClassId] : maxClassId.ToString(),
-                    Confidence = maxClassScore,
-                    RotatedBox = corners,
-                    Angle = (float)(angle * 180.0 / Math.PI) // Convert to degrees
-                });
+                    float x = output[0, 0, i];
+                    float y = output[0, 1, i];
+                    float w = output[0, 2, i];
+                    float h = output[0, 3, i];
+                    float angle = output[0, 4, i]; // 弧度
+
+                    // 还原坐标（去掉padding，除以缩放比）
+                    x = (x - dw) / ratio;
+                    y = (y - dh) / ratio;
+                    w /= ratio;
+                    h /= ratio;
+
+                    // 转换为度数（OpenCV RotatedRect需要度数）
+                    float angleDegree = angle * 180f / (float)Math.PI;
+
+                    rects.Add(new RotatedRect(new Point2f(x, y), new Size2f(w, h), angleDegree));
+                    scores.Add(maxScore);
+                    classIds.Add(maxClassId);
+                }
             }
 
-            TopConfidence = globalMaxScore;
-            return NMS(predictions);
-        }
+            LoggerService.Debug($"[OBB后处理OpenCV] 通过置信度阈值: {rects.Count}/{rows}");
 
-        private PointF[] CalculateRotatedCorners(float cx, float cy, float w, float h, float angle)
-        {
-            // Calculate 4 corners of rotated rectangle
-            float cos = (float)Math.Cos(angle);
-            float sin = (float)Math.Sin(angle);
-
-            float halfW = w / 2;
-            float halfH = h / 2;
-
-            PointF[] corners = new PointF[4];
-
-            // Top-left
-            corners[0] = new PointF(
-                cx + (-halfW * cos - (-halfH) * sin),
-                cy + (-halfW * sin + (-halfH) * cos)
-            );
-
-            // Top-right
-            corners[1] = new PointF(
-                cx + (halfW * cos - (-halfH) * sin),
-                cy + (halfW * sin + (-halfH) * cos)
-            );
-
-            // Bottom-right
-            corners[2] = new PointF(
-                cx + (halfW * cos - halfH * sin),
-                cy + (halfW * sin + halfH * cos)
-            );
-
-            // Bottom-left
-            corners[3] = new PointF(
-                cx + (-halfW * cos - halfH * sin),
-                cy + (-halfW * sin + halfH * cos)
-            );
-
-            return corners;
-        }
-
-        private List<YoloOBBPrediction> NMS(List<YoloOBBPrediction> predictions, float iouThreshold = 0.45f)
-        {
-            var result = new List<YoloOBBPrediction>();
-            var sorted = predictions.OrderByDescending(p => p.Confidence).ToList();
-
-            while (sorted.Count > 0)
+            // 使用自定义的旋转框NMS（OpenCvSharp的NMSBoxes不支持RotatedRect）
+            if (rects.Count > 0)
             {
-                var current = sorted[0];
-                result.Add(current);
-                sorted.RemoveAt(0);
+                //CvDnn.NMSBoxes(rects, scores, confThreshold, iouThreshold, out OpenCvSharp.Rect[] boxes, out float[] confidences, out int[] indices);
+                //Cv2.nm(rects, scores, confThreshold, iouThreshold, out int[] indicesArray);
+                var indices = NMSRotated(rects, scores, iouThreshold);
 
-                for (int i = sorted.Count - 1; i >= 0; i--)
+                LoggerService.Debug($"[OBB后处理OpenCV] NMS后: {indices.Count}");
+
+                foreach (var idx in indices)
                 {
-                    if (CalculateRotatedIoU(current.RotatedBox, sorted[i].RotatedBox) > iouThreshold)
+                    var rect = rects[idx];
+                    // 计算4个角点
+                    Point2f[] corners = rect.Points();
+                    PointF[] rotatedBox = new PointF[4];
+                    for (int i = 0; i < 4; i++)
                     {
-                        sorted.RemoveAt(i);
+                        rotatedBox[i] = new PointF(corners[i].X, corners[i].Y);
+                    }
+
+                    results.Add(new YoloOBBPrediction
+                    {
+                        ClassId = classIds[idx],
+                        Label = _labels != null && classIds[idx] < _labels.Length ? _labels[classIds[idx]] : classIds[idx].ToString(),
+                        Confidence = scores[idx],
+                        RotatedBox = rotatedBox,
+                        Angle = rect.Angle
+                    });
+                }
+
+                TopConfidence = results.Count > 0 ? results.Max(r => r.Confidence) : 0;
+            }
+
+            return results;
+        }
+
+        // 自定义旋转框NMS
+        private List<int> NMSRotated(List<RotatedRect> rects, List<float> scores, float iouThreshold)
+        {
+            var result = new List<int>();
+            var indices = Enumerable.Range(0, rects.Count).OrderByDescending(i => scores[i]).ToList();
+
+            while (indices.Count > 0)
+            {
+                int current = indices[0];
+                result.Add(current);
+                indices.RemoveAt(0);
+
+                for (int i = indices.Count - 1; i >= 0; i--)
+                {
+                    float iou = CalculateRotatedRectIoU(rects[current], rects[indices[i]]);
+                    if (iou > iouThreshold)
+                    {
+                        indices.RemoveAt(i);
                     }
                 }
             }
@@ -298,38 +275,37 @@ namespace AudioTraining
             return result;
         }
 
-        private float CalculateRotatedIoU(PointF[] box1, PointF[] box2)
+        // 计算两个旋转矩形的IoU
+        private float CalculateRotatedRectIoU(RotatedRect rect1, RotatedRect rect2)
         {
-            // Simplified IoU calculation for rotated boxes
-            // For accurate OBB IoU, you would need polygon intersection algorithms
-            // Here we use bounding box approximation for simplicity
+            // 使用OpenCV的rotatedRectangleIntersection计算交集
+            Point2f[] intersectionPoints;
+            var intersectionType = Cv2.RotatedRectangleIntersection(rect1, rect2, out intersectionPoints);
 
-            float minX1 = box1.Min(p => p.X);
-            float maxX1 = box1.Max(p => p.X);
-            float minY1 = box1.Min(p => p.Y);
-            float maxY1 = box1.Max(p => p.Y);
+            if (intersectionType == RectanglesIntersectTypes.None)
+            {
+                return 0f;
+            }
 
-            float minX2 = box2.Min(p => p.X);
-            float maxX2 = box2.Max(p => p.X);
-            float minY2 = box2.Min(p => p.Y);
-            float maxY2 = box2.Max(p => p.Y);
+            // 计算交集面积
+            float intersectionArea = 0f;
+            if (intersectionPoints != null && intersectionPoints.Length > 2)
+            {
+                // 使用contourArea计算多边形面积
+                intersectionArea = (float)Math.Abs(Cv2.ContourArea(intersectionPoints));
+            }
 
-            float x1 = Math.Max(minX1, minX2);
-            float y1 = Math.Max(minY1, minY2);
-            float x2 = Math.Min(maxX1, maxX2);
-            float y2 = Math.Min(maxY1, maxY2);
+            // 计算两个矩形的面积
+            float area1 = rect1.Size.Width * rect1.Size.Height;
+            float area2 = rect2.Size.Width * rect2.Size.Height;
 
-            float intersectionW = Math.Max(0, x2 - x1);
-            float intersectionH = Math.Max(0, y2 - y1);
-            float intersectionArea = intersectionW * intersectionH;
+            // 计算IoU
+            float unionArea = area1 + area2 - intersectionArea;
+            if (unionArea <= 0) return 0f;
 
-            float area1 = (maxX1 - minX1) * (maxY1 - minY1);
-            float area2 = (maxX2 - minX2) * (maxY2 - minY2);
-
-            if (area1 + area2 - intersectionArea == 0) return 0;
-
-            return intersectionArea / (area1 + area2 - intersectionArea);
+            return intersectionArea / unionArea;
         }
+
 
         private float Sigmoid(float x)
         {
