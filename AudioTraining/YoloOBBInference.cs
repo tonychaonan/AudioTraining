@@ -60,8 +60,8 @@ namespace AudioTraining
             // 转换Bitmap到OpenCvSharp Mat
             Mat mat = BitmapToMat(image);
 
-            // 1. Letterbox预处理（与Python Ultralytics一致）
-            Mat inputMat = Letterbox(mat, new OpenCvSharp.Size(_targetSize, _targetSize), out float ratio, out float dw, out float dh);
+            // 1. 简单缩放预处理（参考YOLO成功项目）
+            Mat inputMat = ResizeImage(mat, _targetSize, out float ratio);
 
             // 2. Mat转Tensor
             var inputTensor = MatToTensor(inputMat);
@@ -76,8 +76,8 @@ namespace AudioTraining
             using (var results = _inferenceSession.Run(inputs))
             {
                 var output = results.First().AsTensor<float>();
-                // 4. 后处理（使用OpenCvSharp的NMSBoxesRotated）
-                predictions = PostprocessWithOpenCV(output, ratio, dw, dh, confThreshold, iouThreshold);
+                // 4. 后处理（参考YOLO成功项目的方法）
+                predictions = PostprocessSimple(output, image.Width, image.Height, ratio, confThreshold, iouThreshold);
             }
 
             mat.Dispose();
@@ -93,35 +93,35 @@ namespace AudioTraining
             return OpenCvSharp.Extensions.BitmapConverter.ToMat(bitmap);
         }
 
-        // Letterbox预处理（与Python Ultralytics一致）
-        private Mat Letterbox(Mat img, OpenCvSharp.Size newShape, out float ratio, out float dw, out float dh)
+        // 简单缩放预处理（参考YOLO成功项目）
+        private Mat ResizeImage(Mat img, int targetSize, out float ratio)
         {
             var shape = img.Size();
-            float r = Math.Min((float)newShape.Width / shape.Width, (float)newShape.Height / shape.Height);
+            // 计算缩放比例（保持宽高比）
+            ratio = Math.Min((float)targetSize / shape.Width, (float)targetSize / shape.Height);
 
-            // 不进行upscale
-            if (r > 1f) r = 1f;
-
-            int newUnpadW = (int)Math.Round(shape.Width * r);
-            int newUnpadH = (int)Math.Round(shape.Height * r);
-
-            dw = (newShape.Width - newUnpadW) / 2f;
-            dh = (newShape.Height - newUnpadH) / 2f;
-
-            ratio = r;
+            int newW = (int)Math.Round(shape.Width * ratio);
+            int newH = (int)Math.Round(shape.Height * ratio);
 
             Mat resized = new Mat();
-            Cv2.Resize(img, resized, new OpenCvSharp.Size(newUnpadW, newUnpadH));
+            Cv2.Resize(img, resized, new OpenCvSharp.Size(newW, newH));
 
-            Mat bordered = new Mat();
-            // 填充灰色边框 (114, 114, 114)
-            Cv2.CopyMakeBorder(resized, bordered, 
-                (int)Math.Floor(dh), (int)Math.Ceiling(dh), 
-                (int)Math.Floor(dw), (int)Math.Ceiling(dw), 
-                BorderTypes.Constant, new Scalar(114, 114, 114));
+            // 如果不是正方形，填充到正方形
+            if (newW != targetSize || newH != targetSize)
+            {
+                Mat padded = new Mat();
+                int top = (targetSize - newH) / 2;
+                int bottom = targetSize - newH - top;
+                int left = (targetSize - newW) / 2;
+                int right = targetSize - newW - left;
+                
+                Cv2.CopyMakeBorder(resized, padded, top, bottom, left, right, 
+                    BorderTypes.Constant, new Scalar(114, 114, 114));
+                resized.Dispose();
+                return padded;
+            }
 
-            resized.Dispose();
-            return bordered;
+            return resized;
         }
 
         // Mat转Tensor
@@ -153,34 +153,31 @@ namespace AudioTraining
             return tensor;
         }
 
-        // 使用OpenCvSharp的NMSBoxesRotated进行后处理
-        private List<YoloOBBPrediction> PostprocessWithOpenCV(Tensor<float> output, float ratio, float dw, float dh, float confThreshold, float iouThreshold)
+        // 简化后处理（参考YOLO成功项目）
+        private List<YoloOBBPrediction> PostprocessSimple(Tensor<float> output, int originalW, int originalH, float ratio, float confThreshold, float iouThreshold)
         {
             var results = new List<YoloOBBPrediction>();
 
-            // YOLOv8-OBB输出: [1, 5+classes, 8400]
-            // Channels: 0-3=xywh, 4=angle, 5+=class_scores
+            // YOLOv8-OBB输出: [1, num_channels, 8400]
+            // 关键发现：角度在最后一个channel！
             int dimensions = output.Dimensions[1];
             int rows = output.Dimensions[2]; // 8400 anchors
-            int numClasses = dimensions - 5;
+            int numClasses = dimensions - 5; // 前4个是xywh，最后1个是angle，中间是类别
 
-            LoggerService.Debug($"[OBB后处理OpenCV] 输出形状: [{output.Dimensions[0]}, {dimensions}, {rows}], 类别数: {numClasses}");
+            LoggerService.Debug($"[OBB简化后处理] 输出形状: [{output.Dimensions[0]}, {dimensions}, {rows}], 类别数: {numClasses}");
 
-            var rects = new List<RotatedRect>();
-            var scores = new List<float>();
-            var classIds = new List<int>();
+            // 第一步：置信度过滤（参考YOLO项目的置信度过滤_obb方法）
+            var filteredData = new List<(float x, float y, float w, float h, float conf, int classId, float angle)>();
 
             for (int i = 0; i < rows; i++)
             {
-                // 找出最高置信度的类别
+                // 找出最高置信度的类别（从channel 4开始）
                 float maxScore = 0;
                 int maxClassId = -1;
 
                 for (int c = 0; c < numClasses; c++)
                 {
-                    float rawScore = output[0, 5 + c, i];
-                    // 应用Sigmoid
-                    float score = Sigmoid(rawScore);
+                    float score = output[0, 4 + c, i]; // 不使用Sigmoid！
 
                     if (score > maxScore)
                     {
@@ -195,79 +192,73 @@ namespace AudioTraining
                     float y = output[0, 1, i];
                     float w = output[0, 2, i];
                     float h = output[0, 3, i];
-                    float angle = output[0, 4, i]; // 弧度
+                    float angle = output[0, dimensions - 1, i]; // 角度在最后一个channel！
 
-                    // 还原坐标（去掉padding，除以缩放比）
-                    x = (x - dw) / ratio;
-                    y = (y - dh) / ratio;
-                    w /= ratio;
-                    h /= ratio;
-
-                    // 转换为度数（OpenCV RotatedRect需要度数）
-                    float angleDegree = angle * 180f / (float)Math.PI;
-
-                    rects.Add(new RotatedRect(new Point2f(x, y), new Size2f(w, h), angleDegree));
-                    scores.Add(maxScore);
-                    classIds.Add(maxClassId);
+                    filteredData.Add((x, y, w, h, maxScore, maxClassId, angle));
                 }
             }
 
-            LoggerService.Debug($"[OBB后处理OpenCV] 通过置信度阈值: {rects.Count}/{rows}");
+            LoggerService.Debug($"[OBB简化后处理] 通过置信度阈值: {filteredData.Count}/{rows}");
 
-            // 使用自定义的旋转框NMS（OpenCvSharp的NMSBoxes不支持RotatedRect）
-            if (rects.Count > 0)
+            if (filteredData.Count == 0)
             {
-                //CvDnn.NMSBoxes(rects, scores, confThreshold, iouThreshold, out OpenCvSharp.Rect[] boxes, out float[] confidences, out int[] indices);
-                //Cv2.nm(rects, scores, confThreshold, iouThreshold, out int[] indicesArray);
-                var indices = NMSRotated(rects, scores, iouThreshold);
-
-                LoggerService.Debug($"[OBB后处理OpenCV] NMS后: {indices.Count}");
-
-                foreach (var idx in indices)
-                {
-                    var rect = rects[idx];
-                    // 计算4个角点
-                    Point2f[] corners = rect.Points();
-                    PointF[] rotatedBox = new PointF[4];
-                    for (int i = 0; i < 4; i++)
-                    {
-                        rotatedBox[i] = new PointF(corners[i].X, corners[i].Y);
-                    }
-
-                    results.Add(new YoloOBBPrediction
-                    {
-                        ClassId = classIds[idx],
-                        Label = _labels != null && classIds[idx] < _labels.Length ? _labels[classIds[idx]] : classIds[idx].ToString(),
-                        Confidence = scores[idx],
-                        RotatedBox = rotatedBox,
-                        Angle = rect.Angle
-                    });
-                }
-
-                TopConfidence = results.Count > 0 ? results.Max(r => r.Confidence) : 0;
+                return results;
             }
+
+            // 第二步：NMS（使用轴对齐IoU，参考YOLO项目）
+            var nmsResults = NMSSimple(filteredData, iouThreshold);
+
+            LoggerService.Debug($"[OBB简化后处理] NMS后: {nmsResults.Count}");
+
+            // 第三步：坐标还原和构建结果
+            foreach (var data in nmsResults)
+            {
+                // 还原到原始图像坐标（简单除以缩放比）
+                float x = data.x / ratio;
+                float y = data.y / ratio;
+                float w = data.w / ratio;
+                float h = data.h / ratio;
+                float angle = data.angle; // 角度不缩放
+
+                // 计算旋转矩形的4个角点
+                PointF[] corners = CalculateRotatedCorners(x, y, w, h, angle);
+
+                results.Add(new YoloOBBPrediction
+                {
+                    ClassId = data.classId,
+                    Label = _labels != null && data.classId < _labels.Length ? _labels[data.classId] : data.classId.ToString(),
+                    Confidence = data.conf,
+                    RotatedBox = corners,
+                    Angle = angle * 180f / (float)Math.PI // 转换为度数
+                });
+            }
+
+            TopConfidence = results.Count > 0 ? results.Max(r => r.Confidence) : 0;
 
             return results;
         }
 
-        // 自定义旋转框NMS
-        private List<int> NMSRotated(List<RotatedRect> rects, List<float> scores, float iouThreshold)
+        // 简化NMS（使用轴对齐IoU，参考YOLO项目）
+        private List<(float x, float y, float w, float h, float conf, int classId, float angle)> NMSSimple(
+            List<(float x, float y, float w, float h, float conf, int classId, float angle)> data, float iouThreshold)
         {
-            var result = new List<int>();
-            var indices = Enumerable.Range(0, rects.Count).OrderByDescending(i => scores[i]).ToList();
+            // 按置信度降序排序
+            var sorted = data.OrderByDescending(d => d.conf).ToList();
+            var result = new List<(float x, float y, float w, float h, float conf, int classId, float angle)>();
 
-            while (indices.Count > 0)
+            while (sorted.Count > 0)
             {
-                int current = indices[0];
+                var current = sorted[0];
                 result.Add(current);
-                indices.RemoveAt(0);
+                sorted.RemoveAt(0);
 
-                for (int i = indices.Count - 1; i >= 0; i--)
+                // 移除与当前框IoU过高的框
+                for (int i = sorted.Count - 1; i >= 0; i--)
                 {
-                    float iou = CalculateRotatedRectIoU(rects[current], rects[indices[i]]);
+                    float iou = CalculateAxisAlignedIoU(current, sorted[i]);
                     if (iou > iouThreshold)
                     {
-                        indices.RemoveAt(i);
+                        sorted.RemoveAt(i);
                     }
                 }
             }
@@ -275,42 +266,63 @@ namespace AudioTraining
             return result;
         }
 
-        // 计算两个旋转矩形的IoU
-        private float CalculateRotatedRectIoU(RotatedRect rect1, RotatedRect rect2)
+        // 计算轴对齐矩形IoU（参考YOLO项目的计算交并比方法）
+        private float CalculateAxisAlignedIoU(
+            (float x, float y, float w, float h, float conf, int classId, float angle) box1,
+            (float x, float y, float w, float h, float conf, int classId, float angle) box2)
         {
-            // 使用OpenCV的rotatedRectangleIntersection计算交集
-            Point2f[] intersectionPoints;
-            var intersectionType = Cv2.RotatedRectangleIntersection(rect1, rect2, out intersectionPoints);
+            // 转换为左上角和右下角坐标
+            float x1_min = box1.x - box1.w / 2;
+            float y1_min = box1.y - box1.h / 2;
+            float x1_max = box1.x + box1.w / 2;
+            float y1_max = box1.y + box1.h / 2;
 
-            if (intersectionType == RectanglesIntersectTypes.None)
-            {
-                return 0f;
-            }
+            float x2_min = box2.x - box2.w / 2;
+            float y2_min = box2.y - box2.h / 2;
+            float x2_max = box2.x + box2.w / 2;
+            float y2_max = box2.y + box2.h / 2;
 
-            // 计算交集面积
+            // 计算交集
+            float inter_x_min = Math.Max(x1_min, x2_min);
+            float inter_y_min = Math.Max(y1_min, y2_min);
+            float inter_x_max = Math.Min(x1_max, x2_max);
+            float inter_y_max = Math.Min(y1_max, y2_max);
+
             float intersectionArea = 0f;
-            if (intersectionPoints != null && intersectionPoints.Length > 2)
+            if (inter_x_min < inter_x_max && inter_y_min < inter_y_max)
             {
-                // 使用contourArea计算多边形面积
-                intersectionArea = (float)Math.Abs(Cv2.ContourArea(intersectionPoints));
+                intersectionArea = (inter_x_max - inter_x_min) * (inter_y_max - inter_y_min);
             }
 
-            // 计算两个矩形的面积
-            float area1 = rect1.Size.Width * rect1.Size.Height;
-            float area2 = rect2.Size.Width * rect2.Size.Height;
-
-            // 计算IoU
+            // 计算并集
+            float area1 = box1.w * box1.h;
+            float area2 = box2.w * box2.h;
             float unionArea = area1 + area2 - intersectionArea;
+
             if (unionArea <= 0) return 0f;
 
             return intersectionArea / unionArea;
         }
 
-
-        private float Sigmoid(float x)
+        // 计算旋转矩形的4个角点（参考YOLO项目的OBB坐标转换方法）
+        private PointF[] CalculateRotatedCorners(float cx, float cy, float w, float h, float angle)
         {
-            return 1.0f / (1.0f + (float)Math.Exp(-x));
+            float cos_value = (float)Math.Cos(angle);
+            float sin_value = (float)Math.Sin(angle);
+
+            float[] vec1 = { w / 2 * cos_value, w / 2 * sin_value };
+            float[] vec2 = { -h / 2 * sin_value, h / 2 * cos_value };
+
+            return new PointF[]
+            {
+                new PointF(cx + vec1[0] + vec2[0], cy + vec1[1] + vec2[1]),
+                new PointF(cx + vec1[0] - vec2[0], cy + vec1[1] - vec2[1]),
+                new PointF(cx - vec1[0] - vec2[0], cy - vec1[1] - vec2[1]),
+                new PointF(cx - vec1[0] + vec2[0], cy - vec1[1] + vec2[1])
+            };
         }
+
+
 
         public void Dispose()
         {

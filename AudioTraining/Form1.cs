@@ -689,7 +689,7 @@ namespace AudioTraining
                         MessageBox.Show("请先加载OBB模型！");
                         return;
                     }
-                    predictions = _yoloOBBInference.Predict(bmp, 0.8f);
+                    predictions = _yoloOBBInference.Predict(bmp, 0.25f);
                 }
                 else
                 {
