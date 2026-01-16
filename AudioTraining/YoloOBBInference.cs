@@ -57,11 +57,15 @@ namespace AudioTraining
                 throw new InvalidOperationException("Model not loaded. Call LoadModel first.");
             }
 
+            LoggerService.Debug($"[OBB推理] 原始图像尺寸: {image.Width}x{image.Height}");
+
             // 转换Bitmap到OpenCvSharp Mat
             Mat mat = BitmapToMat(image);
 
             // 1. 简单缩放预处理（参考YOLO成功项目）
-            Mat inputMat = ResizeImage(mat, _targetSize, out float ratio);
+            Mat inputMat = ResizeImage(mat, _targetSize, out float ratio, out int padLeft, out int padTop);
+
+            LoggerService.Debug($"[OBB推理] 缩放比例: {ratio}, 输入尺寸: {inputMat.Width}x{inputMat.Height}, Padding: left={padLeft}, top={padTop}");
 
             // 2. Mat转Tensor
             var inputTensor = MatToTensor(inputMat);
@@ -77,7 +81,7 @@ namespace AudioTraining
             {
                 var output = results.First().AsTensor<float>();
                 // 4. 后处理（参考YOLO成功项目的方法）
-                predictions = PostprocessSimple(output, image.Width, image.Height, ratio, confThreshold, iouThreshold);
+                predictions = PostprocessSimple(output, image.Width, image.Height, ratio, padLeft, padTop, confThreshold, iouThreshold);
             }
 
             mat.Dispose();
@@ -94,7 +98,7 @@ namespace AudioTraining
         }
 
         // 简单缩放预处理（参考YOLO成功项目）
-        private Mat ResizeImage(Mat img, int targetSize, out float ratio)
+        private Mat ResizeImage(Mat img, int targetSize, out float ratio, out int padLeft, out int padTop)
         {
             var shape = img.Size();
             // 计算缩放比例（保持宽高比）
@@ -110,17 +114,19 @@ namespace AudioTraining
             if (newW != targetSize || newH != targetSize)
             {
                 Mat padded = new Mat();
-                int top = (targetSize - newH) / 2;
-                int bottom = targetSize - newH - top;
-                int left = (targetSize - newW) / 2;
-                int right = targetSize - newW - left;
+                padTop = (targetSize - newH) / 2;
+                int bottom = targetSize - newH - padTop;
+                padLeft = (targetSize - newW) / 2;
+                int right = targetSize - newW - padLeft;
                 
-                Cv2.CopyMakeBorder(resized, padded, top, bottom, left, right, 
+                Cv2.CopyMakeBorder(resized, padded, padTop, bottom, padLeft, right, 
                     BorderTypes.Constant, new Scalar(114, 114, 114));
                 resized.Dispose();
                 return padded;
             }
 
+            padLeft = 0;
+            padTop = 0;
             return resized;
         }
 
@@ -154,7 +160,7 @@ namespace AudioTraining
         }
 
         // 简化后处理（参考YOLO成功项目）
-        private List<YoloOBBPrediction> PostprocessSimple(Tensor<float> output, int originalW, int originalH, float ratio, float confThreshold, float iouThreshold)
+        private List<YoloOBBPrediction> PostprocessSimple(Tensor<float> output, int originalW, int originalH, float ratio, int padLeft, int padTop, float confThreshold, float iouThreshold)
         {
             var results = new List<YoloOBBPrediction>();
 
@@ -213,15 +219,21 @@ namespace AudioTraining
             // 第三步：坐标还原和构建结果
             foreach (var data in nmsResults)
             {
-                // 还原到原始图像坐标（简单除以缩放比）
-                float x = data.x / ratio;
-                float y = data.y / ratio;
+                LoggerService.Debug($"[坐标还原] 模型输出: cx={data.x:F2}, cy={data.y:F2}, w={data.w:F2}, h={data.h:F2}, angle={data.angle:F4}");
+                
+                // 还原到原始图像坐标：先减去padding，再除以缩放比
+                float x = (data.x - padLeft) / ratio;
+                float y = (data.y - padTop) / ratio;
                 float w = data.w / ratio;
                 float h = data.h / ratio;
                 float angle = data.angle; // 角度不缩放
 
+                LoggerService.Debug($"[坐标还原] 还原后: cx={x:F2}, cy={y:F2}, w={w:F2}, h={h:F2}, angle={angle:F4} (ratio={ratio:F4}, padLeft={padLeft}, padTop={padTop})");
+
                 // 计算旋转矩形的4个角点
                 PointF[] corners = CalculateRotatedCorners(x, y, w, h, angle);
+
+                LoggerService.Debug($"[坐标还原] 角点: P1=({corners[0].X:F2},{corners[0].Y:F2}), P2=({corners[1].X:F2},{corners[1].Y:F2}), P3=({corners[2].X:F2},{corners[2].Y:F2}), P4=({corners[3].X:F2},{corners[3].Y:F2})");
 
                 results.Add(new YoloOBBPrediction
                 {

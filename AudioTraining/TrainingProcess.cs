@@ -1,3 +1,4 @@
+using AudioTraining.Services;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -72,21 +73,37 @@ namespace AudioTraining
                 ExitCode = _process.ExitCode;
                 ErrorLog = _errorBuffer.ToString();
                 OnOutput("Python training process exited.");
+                LoggerService.Info($"[Training] Process exited with code: {ExitCode}");
+                if (ExitCode != 0)
+                {
+                    LoggerService.Error($"[Training] Process failed with exit code {ExitCode}. Error log: {ErrorLog}");
+                }
+                else
+                {
+                    LoggerService.Info($"[Training] Training completed successfully");
+                }
                 TrainingCompleted?.Invoke(this, EventArgs.Empty);
             };
 
             try
             {
                 OnOutput($"Starting Python script: {pythonExe} {args}");
+                LoggerService.Info($"[Training] Starting Python training process");
+                LoggerService.Info($"[Training] Python executable: {pythonExe}");
+                LoggerService.Info($"[Training] Arguments: {args}");
+                LoggerService.Info($"[Training] Working directory: {_process.StartInfo.WorkingDirectory}");
+                
                 _process.Start();
                 _process.BeginOutputReadLine();
                 _process.BeginErrorReadLine();
                 
+                LoggerService.Info($"[Training] Process started with PID: {_process.Id}");
                 await Task.Run(() => _process.WaitForExit());
             }
             catch (Exception ex)
             {
                 OnOutput($"Error starting python process: {ex.Message}. Make sure 'python' is installed and in PATH.");
+                //LoggerService.Error($"[Training] Failed to start Python process: {ex.Message.ToString()}", ex.ToString);
             }
         }
 
@@ -99,6 +116,11 @@ namespace AudioTraining
             if (isError)
             {
                 _errorBuffer.AppendLine(line);
+                LoggerService.Warn($"[Training] STDERR: {line}");
+            }
+            else
+            {
+                LoggerService.Info($"[Training] STDOUT: {line}");
             }
 
             // Capture ONNX Path
@@ -109,6 +131,7 @@ namespace AudioTraining
                 {
                     OnnxModelPath = parts[1].Trim().Trim('-');
                     OnnxModelPath = OnnxModelPath.Trim();
+                    LoggerService.Info($"[Training] ONNX model path captured: {OnnxModelPath}");
                 }
             }
 
@@ -135,6 +158,7 @@ namespace AudioTraining
 
         private void OnOutput(string message)
         {
+            LoggerService.Info($"[Training] {message}");
             OutputReceived?.Invoke(this, new TrainingEventArgs { Message = message });
         }
 
@@ -144,10 +168,15 @@ namespace AudioTraining
             {
                 if (_process != null && !_process.HasExited)
                 {
+                    LoggerService.Info($"[Training] Stopping training process (PID: {_process.Id})");
                     _process.Kill();
+                    LoggerService.Info($"[Training] Training process stopped");
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                //LoggerService.Error($"[Training] Error stopping process: {ex.Message}", ex);
+            }
         }
     }
 }
