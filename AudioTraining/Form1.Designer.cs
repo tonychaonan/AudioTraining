@@ -28,9 +28,9 @@
         /// </summary>
         private void InitializeComponent()
         {
-            System.Windows.Forms.DataVisualization.Charting.ChartArea chartArea2 = new System.Windows.Forms.DataVisualization.Charting.ChartArea();
-            System.Windows.Forms.DataVisualization.Charting.Legend legend2 = new System.Windows.Forms.DataVisualization.Charting.Legend();
-            System.Windows.Forms.DataVisualization.Charting.Series series2 = new System.Windows.Forms.DataVisualization.Charting.Series();
+            System.Windows.Forms.DataVisualization.Charting.ChartArea chartArea1 = new System.Windows.Forms.DataVisualization.Charting.ChartArea();
+            System.Windows.Forms.DataVisualization.Charting.Legend legend1 = new System.Windows.Forms.DataVisualization.Charting.Legend();
+            System.Windows.Forms.DataVisualization.Charting.Series series1 = new System.Windows.Forms.DataVisualization.Charting.Series();
             this.tabControl1 = new System.Windows.Forms.TabControl();
             this.tabData = new System.Windows.Forms.TabPage();
             this.splitContainerData = new System.Windows.Forms.SplitContainer();
@@ -47,6 +47,8 @@
             this.btnBrowsePython = new System.Windows.Forms.Button();
             this.txtPythonPath = new System.Windows.Forms.TextBox();
             this.labelPython = new System.Windows.Forms.Label();
+            this.chkEnableSeed = new System.Windows.Forms.CheckBox();
+            this.numSeed = new System.Windows.Forms.NumericUpDown();
             this.numBatchSize = new System.Windows.Forms.NumericUpDown();
             this.label2 = new System.Windows.Forms.Label();
             this.numEpochs = new System.Windows.Forms.NumericUpDown();
@@ -81,6 +83,7 @@
             this.panelDataTop.SuspendLayout();
             this.tabConfig.SuspendLayout();
             this.grpTrainParams.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.numSeed)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numBatchSize)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numEpochs)).BeginInit();
             this.grpModel.SuspendLayout();
@@ -211,6 +214,8 @@
             this.grpTrainParams.Controls.Add(this.btnBrowsePython);
             this.grpTrainParams.Controls.Add(this.txtPythonPath);
             this.grpTrainParams.Controls.Add(this.labelPython);
+            this.grpTrainParams.Controls.Add(this.chkEnableSeed);
+            this.grpTrainParams.Controls.Add(this.numSeed);
             this.grpTrainParams.Controls.Add(this.numBatchSize);
             this.grpTrainParams.Controls.Add(this.label2);
             this.grpTrainParams.Controls.Add(this.numEpochs);
@@ -275,6 +280,40 @@
             this.labelPython.Size = new System.Drawing.Size(116, 15);
             this.labelPython.TabIndex = 7;
             this.labelPython.Text = "Python 解释器:";
+            // 
+            // chkEnableSeed
+            // 
+            this.chkEnableSeed.AutoSize = true;
+            this.chkEnableSeed.Location = new System.Drawing.Point(250, 37);
+            this.chkEnableSeed.Name = "chkEnableSeed";
+            this.chkEnableSeed.Size = new System.Drawing.Size(210, 19);
+            this.chkEnableSeed.TabIndex = 10;
+            this.chkEnableSeed.Text = "固定随机种子(可重复训练)";
+            this.chkEnableSeed.UseVisualStyleBackColor = true;
+            this.chkEnableSeed.CheckedChanged += new System.EventHandler(this.chkEnableSeed_CheckedChanged);
+            // 
+            // numSeed
+            // 
+            this.numSeed.Enabled = false;
+            this.numSeed.Location = new System.Drawing.Point(482, 36);
+            this.numSeed.Maximum = new decimal(new int[] {
+            99999,
+            0,
+            0,
+            0});
+            this.numSeed.Minimum = new decimal(new int[] {
+            1,
+            0,
+            0,
+            0});
+            this.numSeed.Name = "numSeed";
+            this.numSeed.Size = new System.Drawing.Size(78, 25);
+            this.numSeed.TabIndex = 11;
+            this.numSeed.Value = new decimal(new int[] {
+            42,
+            0,
+            0,
+            0});
             // 
             // numBatchSize
             // 
@@ -422,18 +461,18 @@
             // 
             // chartLoss
             // 
-            chartArea2.Name = "ChartArea1";
-            this.chartLoss.ChartAreas.Add(chartArea2);
+            chartArea1.Name = "ChartArea1";
+            this.chartLoss.ChartAreas.Add(chartArea1);
             this.chartLoss.Dock = System.Windows.Forms.DockStyle.Fill;
-            legend2.Name = "Legend1";
-            this.chartLoss.Legends.Add(legend2);
+            legend1.Name = "Legend1";
+            this.chartLoss.Legends.Add(legend1);
             this.chartLoss.Location = new System.Drawing.Point(3, 3);
             this.chartLoss.Name = "chartLoss";
-            series2.ChartArea = "ChartArea1";
-            series2.ChartType = System.Windows.Forms.DataVisualization.Charting.SeriesChartType.Line;
-            series2.Legend = "Legend1";
-            series2.Name = "Loss";
-            this.chartLoss.Series.Add(series2);
+            series1.ChartArea = "ChartArea1";
+            series1.ChartType = System.Windows.Forms.DataVisualization.Charting.SeriesChartType.Line;
+            series1.Legend = "Legend1";
+            series1.Name = "Loss";
+            this.chartLoss.Series.Add(series1);
             this.chartLoss.Size = new System.Drawing.Size(970, 280);
             this.chartLoss.TabIndex = 0;
             this.chartLoss.Text = "chart1";
@@ -593,6 +632,7 @@
             this.tabConfig.ResumeLayout(false);
             this.grpTrainParams.ResumeLayout(false);
             this.grpTrainParams.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.numSeed)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numBatchSize)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numEpochs)).EndInit();
             this.grpModel.ResumeLayout(false);
@@ -627,6 +667,8 @@
         private System.Windows.Forms.Button btnLabelImg;
         private System.Windows.Forms.Button btnLoadFolder;
         private System.Windows.Forms.GroupBox grpTrainParams;
+        private System.Windows.Forms.CheckBox chkEnableSeed;
+        private System.Windows.Forms.NumericUpDown numSeed;
         private System.Windows.Forms.NumericUpDown numBatchSize;
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.NumericUpDown numEpochs;

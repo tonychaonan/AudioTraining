@@ -216,6 +216,11 @@ namespace AudioTraining
             }
         }
 
+        private void chkEnableSeed_CheckedChanged(object sender, EventArgs e)
+        {
+            numSeed.Enabled = chkEnableSeed.Checked;
+        }
+
         private async void btnStartTrain_Click(object sender, EventArgs e)
         {
             if (string.IsNullOrEmpty(_currentImageFolder))
@@ -362,7 +367,10 @@ namespace AudioTraining
             string scriptsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Scripts");
             _currentTrainProject = Path.Combine(scriptsDir, "train_output");
 
-            await _trainingProcess.StartTrainingAsync(yamlPath, modelSize, epochs, batch, _currentTrainProject, pythonPath, _useOBBModel);
+            // Get seed value from UI
+            int seed = chkEnableSeed.Checked ? (int)numSeed.Value : 0;
+            
+            await _trainingProcess.StartTrainingAsync(yamlPath, modelSize, epochs, batch, _currentTrainProject, pythonPath, _useOBBModel, seed);
         }
 
         // GenerateDataYaml removed as it is now in DatasetManager

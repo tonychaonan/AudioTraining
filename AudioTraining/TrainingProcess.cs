@@ -32,7 +32,7 @@ namespace AudioTraining
         
         private StringBuilder _errorBuffer;
 
-        public async Task StartTrainingAsync(string dataYamlPath, string modelSize, int epochs, int batchSize, string projectPath, string pythonPath, bool useOBB = false)
+        public async Task StartTrainingAsync(string dataYamlPath, string modelSize, int epochs, int batchSize, string projectPath, string pythonPath, bool useOBB = false, int seed = 0)
         {
             _errorBuffer = new StringBuilder();
             ExitCode = 0;
@@ -50,10 +50,26 @@ namespace AudioTraining
             // Use provided python path or default to "python"
             string pythonExe = string.IsNullOrWhiteSpace(pythonPath) ? "python" : pythonPath;
 
-            // Arguments: <yaml_path> <epochs> <img_size> <model_type> [device]
+            // Arguments: <yaml_path> <epochs> <img_size> <model_type> [device] [seed]
             int imgSize = 640;
             string modelType = useOBB ? "obb" : "detect";
-            string args = $"\"{scriptPath}\" \"{dataYamlPath}\" {epochs} {imgSize} {modelType}";
+            string device = "0"; // Default GPU 0
+            
+            // Build arguments with optional seed parameter
+            string args = $"\"{scriptPath}\" \"{dataYamlPath}\" {epochs} {imgSize} {modelType} {device}";
+            
+            // Add seed parameter if specified (> 0 means enabled)
+            if (seed > 0)
+            {
+                args += $" {seed}";
+                OnOutput($"Training with fixed random seed: {seed} (reproducible mode)");
+                LoggerService.Info($"[Training] Random seed enabled: {seed}");
+            }
+            else
+            {
+                OnOutput("Training without fixed seed (non-deterministic mode, faster)");
+                LoggerService.Info($"[Training] Random seed disabled (non-deterministic mode)");
+            }
 
             _process = new Process();
             _process.StartInfo.FileName = pythonExe;
