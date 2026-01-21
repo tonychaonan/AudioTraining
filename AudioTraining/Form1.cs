@@ -36,8 +36,8 @@ namespace AudioTraining
 
         private void InitializeCustom()
         {
-            cmbModelSize.SelectedIndex = 0; // Default to 'n'
-            cmbModelType.SelectedIndex = 0; // Default to standard detection
+            cmbModelSize.SelectedIndex = 0; 
+            cmbModelType.SelectedIndex = 0; 
             
             _trainingProcess = new TrainingProcess();
             _trainingProcess.OutputReceived += OnTrainingOutputReceived;
@@ -47,10 +47,9 @@ namespace AudioTraining
             _yoloOBBInference = new YoloOBBInference();
 
             _monitorTimer = new Timer();
-            _monitorTimer.Interval = 2000; // Check every 2 seconds
+            _monitorTimer.Interval = 2000;
             _monitorTimer.Tick += MonitorTimer_Tick;
 
-            // Setup Chart
             chartLoss.Series.Clear();
             chartLoss.Series.Add("BoxLoss");
             chartLoss.Series.Add("ClsLoss");
@@ -62,8 +61,6 @@ namespace AudioTraining
             chartLoss.ChartAreas[0].AxisX.Title = "Epochs";
             chartLoss.ChartAreas[0].AxisY.Title = "Loss";
         }
-
-        // ==================== 1. Data Management ====================
 
         private void btnLoadFolder_Click(object sender, EventArgs e)
         {
@@ -112,7 +109,6 @@ namespace AudioTraining
                 
                 if (picPreview.Image != null) picPreview.Image.Dispose();
                 
-                // Load without locking file
                 using (var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read))
                 {
                     picPreview.Image = Image.FromStream(stream);
@@ -148,18 +144,17 @@ namespace AudioTraining
 
                 if (File.Exists(exePath))
                 {
-                    // 1. 去除路径末尾的反斜杠，防止转义双引号
+                    // 去除路径末尾的反斜杠，防止转义双引号
                     // 例如把 "D:\Images\" 变成 "D:\Images"
                     string cleanPath = _currentImageFolder.TrimEnd('\\', '/');
 
-                    // 2. 再加上引号，处理路径中可能包含的空格
                     string args = $"\"{cleanPath}\"";
 
                     ProcessStartInfo psi = new ProcessStartInfo(exePath)
                     {
                         //Arguments = args,
                         WorkingDirectory = toolRoot,
-                        UseShellExecute = false // 建议设为false，这样更稳定
+                        UseShellExecute = false 
                     };
 
                     try
@@ -189,8 +184,6 @@ namespace AudioTraining
                 MessageBox.Show($"无法启动 X-AnyLabeling: {ex.Message}");
             }
         }
-
-        // ==================== 2. Config & 3. Training ====================
 
         private void btnBrowseDataYaml_Click(object sender, EventArgs e)
         {
@@ -229,26 +222,22 @@ namespace AudioTraining
                 return;
             }
 
-            // Get Python Path
             string pythonPath = txtPythonPath.Text.Trim();
             if (string.IsNullOrEmpty(pythonPath))
             {
-                pythonPath = "python"; // default fallback
+                pythonPath = "python"; 
             }
 
-            // 1. Validate X-AnyLabeling annotations
             try
             {
                 string classesFile = Path.Combine(_currentImageFolder, "classes.txt");
                 
-                // Check if classes.txt exists (required by X-AnyLabeling)
                 if (!File.Exists(classesFile))
                 {
                     MessageBox.Show($"未找到 classes.txt 文件！\n\n请确保使用 X-AnyLabeling 标注工具，并已导出标注数据。\n路径: {classesFile}");
                     return;
                 }
 
-                // Validate that TXT annotation files exist
                 var imageFiles = Directory.GetFiles(_currentImageFolder, "*.jpg")
                     .Concat(Directory.GetFiles(_currentImageFolder, "*.png"))
                     .Concat(Directory.GetFiles(_currentImageFolder, "*.bmp"))
@@ -302,19 +291,16 @@ namespace AudioTraining
                 return;
             }
 
-            // 2. Prepare Dataset (Standard Structure & Split)
             string datasetRoot = "";
             string yamlPath = "";
             try
             {
                 AppendConsole("正在整理数据集目录结构 (Train/Val Split)...");
-                // Use DatasetManager to create Dataset_Prepared folder
                 datasetRoot = await Task.Run(() => DatasetManager.PrepareDataset(_currentImageFolder, Path.Combine(_currentImageFolder, "classes.txt")));
                 yamlPath = Path.Combine(datasetRoot, "data.yaml");
                 AppendConsole($"数据集整理完成: {datasetRoot}");
                 AppendConsole($"配置文件生成: {yamlPath}");
                 
-                // Update UI
                 txtDataYaml.Text = yamlPath;
             }
             catch (Exception ex)
@@ -323,30 +309,20 @@ namespace AudioTraining
                 return;
             }
 
-            string modelSize = "n"; // default
+            string modelSize = "n"; 
             if (cmbModelSize.SelectedItem != null)
             {
-                // "n (Nano)" -> "n"
                 modelSize = cmbModelSize.SelectedItem.ToString().Substring(0, 1);
             }
 
             int epochs = (int)numEpochs.Value;
             int batch = (int)numBatchSize.Value;
 
-            // 【关键】从UI读取模型类型
             _useOBBModel = (cmbModelType.SelectedIndex == 1); // 0=Standard, 1=OBB
             AppendConsole($"模型类型: {(_useOBBModel ? "旋转检测 (OBB)" : "标准检测 (Standard)")}");
             LoggerService.Info($"模型类型: {(_useOBBModel ? "旋转检测 (OBB)" : "标准检测 (Standard)")}");
 
-            // Setup output directory
             _currentTrainProject = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runs", "detect");
-            // Python script handles its own output structure usually, but we pass project path to it or let it use default.
-            // In TrainingProcess, we didn't pass projectPath to the python script in the new implementation? 
-            // Let's check TrainingProcess. It seems I didn't pass projectPath in the new args.
-            // The python script hardcodes 'train_output'.
-            // For now, we rely on the python script's internal logic as requested.
-            
-            // Clear previous charts
             foreach (var s in chartLoss.Series) s.Points.Clear();
             txtConsole.Clear();
 
@@ -354,28 +330,14 @@ namespace AudioTraining
             btnStopTrain.Enabled = true;
             
             _monitorTimer.Start();
-
-            // Note: TrainingProcess now calls python script. 
-            // The python script uses its own output dir 'train_output' in CWD.
-            // We might need to point _currentTrainProject to that for the chart to work.
-            // The script puts it in os.getcwd()/train_output/current_exp
-            // TrainingProcess runs in Scripts folder or BaseDirectory?
-            // TrainingProcess sets WorkingDirectory to Path.GetDirectoryName(scriptPath) which is .../Scripts.
-            // So output will be .../Scripts/train_output/current_exp.
-            // We need to update _currentTrainProject so the chart monitor can find results.csv.
             
             string scriptsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Scripts");
             _currentTrainProject = Path.Combine(scriptsDir, "train_output");
 
-            // Get seed value from UI
             int seed = chkEnableSeed.Checked ? (int)numSeed.Value : 0;
             
             await _trainingProcess.StartTrainingAsync(yamlPath, modelSize, epochs, batch, _currentTrainProject, pythonPath, _useOBBModel, seed);
         }
-
-        // GenerateDataYaml removed as it is now in DatasetManager
-        // private void GenerateDataYaml(string imageFolder, string outputPath) ... 
-
 
         private void btnStopTrain_Click(object sender, EventArgs e)
         {
@@ -408,10 +370,8 @@ namespace AudioTraining
             btnStopTrain.Enabled = false;
             AppendConsole("=========== 训练结束 ===========");
             
-            // Try final CSV read
             MonitorTimer_Tick(null, null);
 
-            // Popup Result
             if (_trainingProcess.ExitCode == 0 && !string.IsNullOrEmpty(_trainingProcess.OnnxModelPath))
             {
                 MessageBox.Show($"训练成功！\nONNX模型已导出至:\n{_trainingProcess.OnnxModelPath}", 
@@ -422,7 +382,6 @@ namespace AudioTraining
                 string errorInfo = "未知错误";
                 if (!string.IsNullOrEmpty(_trainingProcess.ErrorLog))
                 {
-                    // Limit log length for messagebox
                     errorInfo = _trainingProcess.ErrorLog.Length > 800 
                         ? "..." + _trainingProcess.ErrorLog.Substring(_trainingProcess.ErrorLog.Length - 800) 
                         : _trainingProcess.ErrorLog;
@@ -437,7 +396,6 @@ namespace AudioTraining
         {
             if (string.IsNullOrEmpty(text)) return;
 
-            // Prevent OutOfMemoryException by limiting log size
             if (txtConsole.TextLength > 30000)
             {
                 txtConsole.Clear();
@@ -450,10 +408,6 @@ namespace AudioTraining
 
         private void MonitorTimer_Tick(object sender, EventArgs e)
         {
-            // Parse results.csv for loss plotting
-            // Path: runs/detect/exp/results.csv (or exp2, exp3...)
-            // YOLOv8 increments exp folder name automatically. We need to find the latest modified one.
-
             try
             {
                 var runsDir = new DirectoryInfo(_currentTrainProject);
@@ -475,8 +429,6 @@ namespace AudioTraining
 
         private void UpdateChartFromCsv(string csvPath)
         {
-            // CSV Format usually:
-            // epoch, train/box_loss, train/cls_loss, train/dfl_loss, metrics/..., val/..., ...
             
             try
             {
@@ -494,13 +446,7 @@ namespace AudioTraining
 
                     if (idxBox == -1 || idxCls == -1 || idxDfl == -1 || idxEpoch == -1) return;
 
-                    // Read all lines
-                    var lines = sr.ReadToEnd().Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-                    
-                    // We only add points that are not yet in the chart
-                    // But simpler to just reload everything or check count
-                    
-                    // Optimization: check if we need to update
+                    var lines = sr.ReadToEnd().Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);                  
                     if (chartLoss.Series["BoxLoss"].Points.Count == lines.Length) return;
 
                     chartLoss.Series["BoxLoss"].Points.Clear();
@@ -526,8 +472,6 @@ namespace AudioTraining
             }
             catch { }
         }
-
-        // ==================== 4. Validation ====================
 
         private void btnLoadModel_Click(object sender, EventArgs e)
         {
@@ -631,7 +575,6 @@ namespace AudioTraining
                             g.DrawPolygon(pen, pred.RotatedBox);
                         }
 
-                        // 绘制标签
                         string label = _useOBBModel 
                             ? $"{pred.Label} {pred.Confidence:F2} ({pred.Angle:F1}°)"
                             : $"{pred.Label} {pred.Confidence:F2}";

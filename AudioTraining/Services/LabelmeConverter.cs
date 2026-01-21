@@ -86,12 +86,11 @@ namespace AudioTraining.Services
                 if (string.IsNullOrEmpty(label)) continue;
 
                 int classId = classNames.IndexOf(label);
-                if (classId == -1) continue; // Skip unknown classes
+                if (classId == -1) continue; 
 
                 var points = shape["points"] as JArray;
                 if (points == null || points.Count == 0) continue;
 
-                // Calculate bounding box from points
                 float minX = float.MaxValue, minY = float.MaxValue;
                 float maxX = float.MinValue, maxY = float.MinValue;
 
@@ -111,13 +110,11 @@ namespace AudioTraining.Services
                 float width = maxX - minX;
                 float height = maxY - minY;
 
-                // Normalize
                 float normX = centerX / imgWidth;
                 float normY = centerY / imgHeight;
                 float normW = width / imgWidth;
                 float normH = height / imgHeight;
 
-                // Clamp
                 normX = Math.Max(0, Math.Min(1, normX));
                 normY = Math.Max(0, Math.Min(1, normY));
                 normW = Math.Max(0, Math.Min(1, normW));
