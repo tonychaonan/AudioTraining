@@ -11,7 +11,7 @@ def main():
     model_path = sys.argv[1]
     image_path = sys.argv[2]
     conf_threshold = float(sys.argv[3])
-    model_type = sys.argv[4] if len(sys.argv) > 4 else "detect"  # 'detect' or 'obb'
+    model_type = sys.argv[4] if len(sys.argv) > 4 else "detect" 
     
     # 验证文件存在
     if not os.path.exists(model_path):

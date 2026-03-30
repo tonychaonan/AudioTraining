@@ -39,7 +39,6 @@ namespace AudioTraining
             OnnxModelPath = null;
             ErrorLog = string.Empty;
 
-            // We need to find the python script
             string scriptPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Scripts", "train_wrapper.py");
             if (!File.Exists(scriptPath))
             {
@@ -47,19 +46,17 @@ namespace AudioTraining
                 return;
             }
 
-            // Use provided python path or default to "python"
             string pythonExe = string.IsNullOrWhiteSpace(pythonPath) ? "python" : pythonPath;
 
             // Arguments: <yaml_path> <epochs> <img_size> <model_type> <device> <model_size> <batch_size> [seed] [base_model_path]
             int imgSize = 640;
             string modelType = useOBB ? "obb" : "detect";
-            string device = "0"; // Default GPU 0
+            string device = "0";
             
             // Build arguments with required parameters
             string normalizedModelSize = string.IsNullOrWhiteSpace(modelSize) ? "n" : modelSize.Trim().ToLowerInvariant();
             string args = $"\"{scriptPath}\" \"{dataYamlPath}\" {epochs} {imgSize} {modelType} {device} {normalizedModelSize} {batchSize}";
             
-            // Add seed parameter if specified (> 0 means enabled)
             if (seed > 0)
             {
                 args += $" {seed}";
@@ -82,7 +79,7 @@ namespace AudioTraining
             _process = new Process();
             _process.StartInfo.FileName = pythonExe;
             _process.StartInfo.Arguments = args;
-            _process.StartInfo.WorkingDirectory = Path.GetDirectoryName(scriptPath); // Run in Scripts folder or BaseDirectory
+            _process.StartInfo.WorkingDirectory = Path.GetDirectoryName(scriptPath); 
             _process.StartInfo.UseShellExecute = false;
             _process.StartInfo.RedirectStandardOutput = true;
             _process.StartInfo.RedirectStandardError = true;
@@ -127,11 +124,8 @@ namespace AudioTraining
             catch (Exception ex)
             {
                 OnOutput($"Error starting python process: {ex.Message}. Make sure 'python' is installed and in PATH.");
-                //LoggerService.Error($"[Training] Failed to start Python process: {ex.Message.ToString()}", ex.ToString);
             }
         }
-
-        // Removed separate ExportToOnnx as it is handled by the python script now.
 
         private void ParseOutput(string line, bool isError)
         {
@@ -147,7 +141,6 @@ namespace AudioTraining
                 LoggerService.Info($"[Training] STDOUT: {line}");
             }
 
-            // Capture ONNX Path
             if (line.Contains("--- ONNX Path:"))
             {
                 var parts = line.Split(new[] { "--- ONNX Path:" }, StringSplitOptions.None);
@@ -160,12 +153,6 @@ namespace AudioTraining
             }
 
             var args = new TrainingEventArgs { Message = line };
-
-            // Example output to parse (varies by version, roughly):
-            // 1/100     2.34G    0.87    1.2    1.1   12  640: 100%|...
-            // Or typically stats line
-            
-            // Simple regex for Epoch parsing "1/100"
             var epochMatch = Regex.Match(line, @"(\d+)/(\d+)");
             if (epochMatch.Success)
             {
@@ -199,7 +186,6 @@ namespace AudioTraining
             }
             catch (Exception ex)
             {
-                //LoggerService.Error($"[Training] Error stopping process: {ex.Message}", ex);
             }
         }
     }
