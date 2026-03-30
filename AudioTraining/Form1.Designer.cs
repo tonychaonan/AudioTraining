@@ -37,10 +37,17 @@
             this.lstImages = new System.Windows.Forms.ListBox();
             this.picPreview = new System.Windows.Forms.PictureBox();
             this.panelDataTop = new System.Windows.Forms.Panel();
+            this.btnGenerateXAnyLabelingYaml = new System.Windows.Forms.Button();
+            this.lblAutoAnnotateStatus = new System.Windows.Forms.Label();
+            this.btnReviewCurrentFolder = new System.Windows.Forms.Button();
+            this.btnBatchAutoAnnotate = new System.Windows.Forms.Button();
             this.btnLabelImg = new System.Windows.Forms.Button();
             this.btnLoadFolder = new System.Windows.Forms.Button();
             this.tabConfig = new System.Windows.Forms.TabPage();
             this.grpTrainParams = new System.Windows.Forms.GroupBox();
+            this.btnBrowseBaseModel = new System.Windows.Forms.Button();
+            this.txtBaseModelPath = new System.Windows.Forms.TextBox();
+            this.chkContinueTrain = new System.Windows.Forms.CheckBox();
             this.btnBrowseDataYaml = new System.Windows.Forms.Button();
             this.txtDataYaml = new System.Windows.Forms.TextBox();
             this.label4 = new System.Windows.Forms.Label();
@@ -75,9 +82,9 @@
             this.btnLoadModel = new System.Windows.Forms.Button();
             this.tabControl1.SuspendLayout();
             this.tabData.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.splitContainerData)).BeginInit();
             this.splitContainerData.Panel1.SuspendLayout();
             this.splitContainerData.Panel2.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.splitContainerData)).BeginInit();
             this.splitContainerData.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.picPreview)).BeginInit();
             this.panelDataTop.SuspendLayout();
@@ -128,7 +135,7 @@
             // splitContainerData
             // 
             this.splitContainerData.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.splitContainerData.Location = new System.Drawing.Point(3, 63);
+            this.splitContainerData.Location = new System.Drawing.Point(3, 98);
             this.splitContainerData.Name = "splitContainerData";
             // 
             // splitContainerData.Panel1
@@ -166,17 +173,50 @@
             // 
             // panelDataTop
             // 
+            this.panelDataTop.Controls.Add(this.lblAutoAnnotateStatus);
+            this.panelDataTop.Controls.Add(this.btnGenerateXAnyLabelingYaml);
+            this.panelDataTop.Controls.Add(this.btnReviewCurrentFolder);
+            this.panelDataTop.Controls.Add(this.btnBatchAutoAnnotate);
             this.panelDataTop.Controls.Add(this.btnLabelImg);
             this.panelDataTop.Controls.Add(this.btnLoadFolder);
             this.panelDataTop.Dock = System.Windows.Forms.DockStyle.Top;
             this.panelDataTop.Location = new System.Drawing.Point(3, 3);
             this.panelDataTop.Name = "panelDataTop";
-            this.panelDataTop.Size = new System.Drawing.Size(970, 60);
+            this.panelDataTop.Size = new System.Drawing.Size(970, 95);
             this.panelDataTop.TabIndex = 0;
+            // 
+            // lblAutoAnnotateStatus
+            // 
+            this.lblAutoAnnotateStatus.AutoSize = true;
+            this.lblAutoAnnotateStatus.Location = new System.Drawing.Point(682, 55);
+            this.lblAutoAnnotateStatus.Name = "lblAutoAnnotateStatus";
+            this.lblAutoAnnotateStatus.Size = new System.Drawing.Size(127, 15);
+            this.lblAutoAnnotateStatus.TabIndex = 4;
+            this.lblAutoAnnotateStatus.Text = "自动标注：未执行";
+            // 
+            // btnReviewCurrentFolder
+            // 
+            this.btnReviewCurrentFolder.Location = new System.Drawing.Point(524, 10);
+            this.btnReviewCurrentFolder.Name = "btnReviewCurrentFolder";
+            this.btnReviewCurrentFolder.Size = new System.Drawing.Size(143, 30);
+            this.btnReviewCurrentFolder.TabIndex = 3;
+            this.btnReviewCurrentFolder.Text = "人工复核当前目录";
+            this.btnReviewCurrentFolder.UseVisualStyleBackColor = true;
+            this.btnReviewCurrentFolder.Click += new System.EventHandler(this.btnReviewCurrentFolder_Click);
+            // 
+            // btnBatchAutoAnnotate
+            // 
+            this.btnBatchAutoAnnotate.Location = new System.Drawing.Point(343, 10);
+            this.btnBatchAutoAnnotate.Name = "btnBatchAutoAnnotate";
+            this.btnBatchAutoAnnotate.Size = new System.Drawing.Size(166, 30);
+            this.btnBatchAutoAnnotate.TabIndex = 2;
+            this.btnBatchAutoAnnotate.Text = "批量自动标注当前目录";
+            this.btnBatchAutoAnnotate.UseVisualStyleBackColor = true;
+            this.btnBatchAutoAnnotate.Click += new System.EventHandler(this.btnBatchAutoAnnotate_Click);
             // 
             // btnLabelImg
             // 
-            this.btnLabelImg.Location = new System.Drawing.Point(150, 15);
+            this.btnLabelImg.Location = new System.Drawing.Point(150, 10);
             this.btnLabelImg.Name = "btnLabelImg";
             this.btnLabelImg.Size = new System.Drawing.Size(178, 30);
             this.btnLabelImg.TabIndex = 1;
@@ -184,9 +224,19 @@
             this.btnLabelImg.UseVisualStyleBackColor = true;
             this.btnLabelImg.Click += new System.EventHandler(this.btnLabelImg_Click);
             // 
+            // btnGenerateXAnyLabelingYaml
+            // 
+            this.btnGenerateXAnyLabelingYaml.Location = new System.Drawing.Point(15, 48);
+            this.btnGenerateXAnyLabelingYaml.Name = "btnGenerateXAnyLabelingYaml";
+            this.btnGenerateXAnyLabelingYaml.Size = new System.Drawing.Size(178, 30);
+            this.btnGenerateXAnyLabelingYaml.TabIndex = 5;
+            this.btnGenerateXAnyLabelingYaml.Text = "生成标注工具配置";
+            this.btnGenerateXAnyLabelingYaml.UseVisualStyleBackColor = true;
+            this.btnGenerateXAnyLabelingYaml.Click += new System.EventHandler(this.btnGenerateXAnyLabelingYaml_Click);
+            // 
             // btnLoadFolder
             // 
-            this.btnLoadFolder.Location = new System.Drawing.Point(15, 15);
+            this.btnLoadFolder.Location = new System.Drawing.Point(15, 10);
             this.btnLoadFolder.Name = "btnLoadFolder";
             this.btnLoadFolder.Size = new System.Drawing.Size(120, 30);
             this.btnLoadFolder.TabIndex = 0;
@@ -208,6 +258,9 @@
             // 
             // grpTrainParams
             // 
+            this.grpTrainParams.Controls.Add(this.btnBrowseBaseModel);
+            this.grpTrainParams.Controls.Add(this.txtBaseModelPath);
+            this.grpTrainParams.Controls.Add(this.chkContinueTrain);
             this.grpTrainParams.Controls.Add(this.btnBrowseDataYaml);
             this.grpTrainParams.Controls.Add(this.txtDataYaml);
             this.grpTrainParams.Controls.Add(this.label4);
@@ -222,10 +275,40 @@
             this.grpTrainParams.Controls.Add(this.label1);
             this.grpTrainParams.Location = new System.Drawing.Point(20, 160);
             this.grpTrainParams.Name = "grpTrainParams";
-            this.grpTrainParams.Size = new System.Drawing.Size(600, 200);
+            this.grpTrainParams.Size = new System.Drawing.Size(600, 280);
             this.grpTrainParams.TabIndex = 1;
             this.grpTrainParams.TabStop = false;
             this.grpTrainParams.Text = "训练参数";
+            // 
+            // btnBrowseBaseModel
+            // 
+            this.btnBrowseBaseModel.Enabled = false;
+            this.btnBrowseBaseModel.Location = new System.Drawing.Point(519, 236);
+            this.btnBrowseBaseModel.Name = "btnBrowseBaseModel";
+            this.btnBrowseBaseModel.Size = new System.Drawing.Size(75, 23);
+            this.btnBrowseBaseModel.TabIndex = 14;
+            this.btnBrowseBaseModel.Text = "浏览...";
+            this.btnBrowseBaseModel.UseVisualStyleBackColor = true;
+            this.btnBrowseBaseModel.Click += new System.EventHandler(this.btnBrowseBaseModel_Click);
+            // 
+            // txtBaseModelPath
+            // 
+            this.txtBaseModelPath.Enabled = false;
+            this.txtBaseModelPath.Location = new System.Drawing.Point(119, 236);
+            this.txtBaseModelPath.Name = "txtBaseModelPath";
+            this.txtBaseModelPath.Size = new System.Drawing.Size(394, 25);
+            this.txtBaseModelPath.TabIndex = 13;
+            // 
+            // chkContinueTrain
+            // 
+            this.chkContinueTrain.AutoSize = true;
+            this.chkContinueTrain.Location = new System.Drawing.Point(9, 205);
+            this.chkContinueTrain.Name = "chkContinueTrain";
+            this.chkContinueTrain.Size = new System.Drawing.Size(179, 19);
+            this.chkContinueTrain.TabIndex = 12;
+            this.chkContinueTrain.Text = "从已有模型继续训练";
+            this.chkContinueTrain.UseVisualStyleBackColor = true;
+            this.chkContinueTrain.CheckedChanged += new System.EventHandler(this.chkContinueTrain_CheckedChanged);
             // 
             // btnBrowseDataYaml
             // 
@@ -629,6 +712,7 @@
             this.splitContainerData.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)(this.picPreview)).EndInit();
             this.panelDataTop.ResumeLayout(false);
+            this.panelDataTop.PerformLayout();
             this.tabConfig.ResumeLayout(false);
             this.grpTrainParams.ResumeLayout(false);
             this.grpTrainParams.PerformLayout();
@@ -657,16 +741,27 @@
 
         private System.Windows.Forms.TabControl tabControl1;
         private System.Windows.Forms.TabPage tabData;
-        private System.Windows.Forms.TabPage tabConfig;
-        private System.Windows.Forms.TabPage tabTrain;
-        private System.Windows.Forms.TabPage tabValid;
         private System.Windows.Forms.SplitContainer splitContainerData;
         private System.Windows.Forms.ListBox lstImages;
         private System.Windows.Forms.PictureBox picPreview;
         private System.Windows.Forms.Panel panelDataTop;
+        private System.Windows.Forms.Label lblAutoAnnotateStatus;
+        private System.Windows.Forms.Button btnReviewCurrentFolder;
+        private System.Windows.Forms.Button btnBatchAutoAnnotate;
         private System.Windows.Forms.Button btnLabelImg;
         private System.Windows.Forms.Button btnLoadFolder;
+        private System.Windows.Forms.Button btnGenerateXAnyLabelingYaml;
+        private System.Windows.Forms.TabPage tabConfig;
         private System.Windows.Forms.GroupBox grpTrainParams;
+        private System.Windows.Forms.Button btnBrowseBaseModel;
+        private System.Windows.Forms.TextBox txtBaseModelPath;
+        private System.Windows.Forms.CheckBox chkContinueTrain;
+        private System.Windows.Forms.Button btnBrowseDataYaml;
+        private System.Windows.Forms.TextBox txtDataYaml;
+        private System.Windows.Forms.Label label4;
+        private System.Windows.Forms.Button btnBrowsePython;
+        private System.Windows.Forms.TextBox txtPythonPath;
+        private System.Windows.Forms.Label labelPython;
         private System.Windows.Forms.CheckBox chkEnableSeed;
         private System.Windows.Forms.NumericUpDown numSeed;
         private System.Windows.Forms.NumericUpDown numBatchSize;
@@ -684,6 +779,8 @@
         private System.Windows.Forms.Panel panelTrainTop;
         private System.Windows.Forms.Button btnStopTrain;
         private System.Windows.Forms.Button btnStartTrain;
+        private System.Windows.Forms.TabPage tabValid;
+        private System.Windows.Forms.TabPage tabTrain;
         private System.Windows.Forms.SplitContainer splitContainerValid;
         private System.Windows.Forms.PictureBox picValidPreview;
         private System.Windows.Forms.TextBox txtValidResult;
@@ -691,11 +788,5 @@
         private System.Windows.Forms.Button btnTestImage;
         private System.Windows.Forms.Button btnLoadModel;
         private System.Windows.Forms.Button btnCSharpTest;
-        private System.Windows.Forms.Button btnBrowseDataYaml;
-        private System.Windows.Forms.TextBox txtDataYaml;
-        private System.Windows.Forms.Label label4;
-        private System.Windows.Forms.Label labelPython;
-        private System.Windows.Forms.TextBox txtPythonPath;
-        private System.Windows.Forms.Button btnBrowsePython;
     }
 }

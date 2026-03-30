@@ -23,8 +23,8 @@ def set_seed(seed):
     print("--- Random seed set successfully ---")
 
 def main():
-    if len(sys.argv) < 5:
-        print("Usage: python train_wrapper.py <yaml_path> <epochs> <img_size> <model_type> [device] [seed]")
+    if len(sys.argv) < 8:
+        print("Usage: python train_wrapper.py <yaml_path> <epochs> <img_size> <model_type> <device> <model_size> <batch_size> [seed] [base_model_path]")
         return
 
     # 1. Receive parameters from C#
@@ -32,18 +32,16 @@ def main():
     epochs_count = int(sys.argv[2])
     img_size = int(sys.argv[3])
     model_type = sys.argv[4]  # 'detect' or 'obb'
-    
-    # Optional device argument, default to 0 (GPU 0) or cpu
-    device = '0'
-    if len(sys.argv) > 5:
-        device = sys.argv[5]
+    device = sys.argv[5]
+    model_size = sys.argv[6].strip().lower()
+    batch_size = int(sys.argv[7])
     
     # Optional seed argument for reproducibility
     # If seed is provided and > 0, set random seed
     seed = None
-    if len(sys.argv) > 6:
+    if len(sys.argv) > 8:
         try:
-            seed_value = int(sys.argv[6])
+            seed_value = int(sys.argv[8])
             if seed_value > 0:
                 seed = seed_value
                 set_seed(seed)
@@ -52,14 +50,24 @@ def main():
         except ValueError:
             print("--- Invalid seed value, training will be non-deterministic ---")
 
+    base_model_path = None
+    if len(sys.argv) > 9:
+        candidate_path = sys.argv[9]
+        if candidate_path and os.path.exists(candidate_path):
+            base_model_path = candidate_path
+
     print("--- Python Engine: Loading Model ---")
-    # Load pretrained model based on type
-    if model_type == 'obb':
-        print("Loading YOLOv8-OBB model for oriented bounding box detection...")
-        model = YOLO('yolov8n-obb.pt')  # OBB model for rotated detection
+    if base_model_path:
+        print(f"Loading existing base model for continued training: {base_model_path}")
+        model = YOLO(base_model_path)
     else:
-        print("Loading YOLOv8 standard detection model...")
-        model = YOLO('yolov8n.pt')  # Standard detection model 
+        if model_type == 'obb':
+            model_file = f"yolov8{model_size}-obb.pt"
+            print(f"Loading YOLOv8-OBB model: {model_file}")
+        else:
+            model_file = f"yolov8{model_size}.pt"
+            print(f"Loading YOLOv8 standard detection model: {model_file}")
+        model = YOLO(model_file)
 
     print(f"--- Python Engine: Start Training ({epochs_count} epochs, size {img_size}) ---")
 
@@ -80,6 +88,7 @@ def main():
         'data': yaml_path,
         'epochs': epochs_count,
         'imgsz': img_size,
+        'batch': batch_size,
         'project': project_path,
         'name': exp_name,
         'device': device,

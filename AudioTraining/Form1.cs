@@ -27,6 +27,7 @@ namespace AudioTraining
         private string _currentTrainName = "exp";
         private string _loadedOnnxPath;
         private bool _useOBBModel = false;
+        private readonly string[] _imageExtensions = new[] { ".jpg", ".jpeg", ".png", ".bmp" };
 
         public Form1()
         {
@@ -81,9 +82,8 @@ namespace AudioTraining
             try
             {
                 _currentImageFolder = folderPath;
-                var ext = new List<string> { ".jpg", ".jpeg", ".png", ".bmp" };
                 _imageFiles = Directory.GetFiles(folderPath, "*.*")
-                                     .Where(s => ext.Contains(Path.GetExtension(s).ToLower()))
+                                     .Where(s => _imageExtensions.Contains(Path.GetExtension(s).ToLower()))
                                      .ToList();
 
                 lstImages.Items.Clear();
@@ -94,6 +94,8 @@ namespace AudioTraining
 
                 if (lstImages.Items.Count > 0)
                     lstImages.SelectedIndex = 0;
+
+                UpdateAutoAnnotateStatus();
             }
             catch (Exception ex)
             {
@@ -123,6 +125,119 @@ namespace AudioTraining
 
         private void btnLabelImg_Click(object sender, EventArgs e)
         {
+            OpenCurrentFolderInLabelingTool();
+        }
+
+        private void btnBatchAutoAnnotate_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(_currentImageFolder) || !Directory.Exists(_currentImageFolder))
+            {
+                MessageBox.Show("请先加载图片目录！");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(_loadedOnnxPath) || !File.Exists(_loadedOnnxPath))
+            {
+                MessageBox.Show("请先加载 ONNX 模型！");
+                return;
+            }
+
+            try
+            {
+                var classes = BatchAutoAnnotateCurrentFolder();
+                UpdateAutoAnnotateStatus();
+                MessageBox.Show($"自动标注完成！\n生成类别数: {classes.Count}\n目录: {_currentImageFolder}");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"批量自动标注失败: {ex.Message}");
+            }
+        }
+
+        private void btnGenerateXAnyLabelingYaml_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(_loadedOnnxPath) || !File.Exists(_loadedOnnxPath))
+            {
+                MessageBox.Show("请先在「4. 模型验证」页面加载 ONNX 模型，再生成配置文件！",
+                    "未加载模型", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string classesFile = string.IsNullOrWhiteSpace(_currentImageFolder)
+                ? null
+                : Path.Combine(_currentImageFolder, "classes.txt");
+
+            List<string> classList = new List<string>();
+            if (classesFile != null && File.Exists(classesFile))
+            {
+                classList = File.ReadAllLines(classesFile)
+                    .Select(l => l.Trim())
+                    .Where(l => !string.IsNullOrWhiteSpace(l))
+                    .ToList();
+            }
+
+            if (classList.Count == 0)
+            {
+                classList.Add("defect");
+                MessageBox.Show("未找到 classes.txt，将使用默认类别名称 \"defect\"。\n生成后请手动编辑 YAML 文件中的 classes 列表。",
+                    "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+
+            string modelType = _useOBBModel ? "yolov8_obb" : "yolov8";
+            string modelName = Path.GetFileNameWithoutExtension(_loadedOnnxPath);
+            string onnxAbsPath = Path.GetFullPath(_loadedOnnxPath).Replace("\\", "/");
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"type: {modelType}");
+            sb.AppendLine($"name: {modelName}");
+            sb.AppendLine($"display_name: {modelName}");
+            sb.AppendLine($"model_path: {onnxAbsPath}");
+            sb.AppendLine("input_width: 640");
+            sb.AppendLine("input_height: 640");
+            sb.AppendLine("confidence_threshold: 0.25");
+            sb.AppendLine("nms_threshold: 0.45");
+            sb.AppendLine("classes:");
+            foreach (var cls in classList)
+                sb.AppendLine($"  - {cls}");
+
+            string defaultYamlPath = Path.Combine(
+                Path.GetDirectoryName(_loadedOnnxPath),
+                modelName + "_xanylabeling.yaml");
+
+            using (var sfd = new SaveFileDialog())
+            {
+                sfd.Title = "保存 X-AnyLabeling 模型配置文件";
+                sfd.Filter = "YAML 配置文件 (*.yaml)|*.yaml";
+                sfd.FileName = Path.GetFileName(defaultYamlPath);
+                sfd.InitialDirectory = Path.GetDirectoryName(defaultYamlPath);
+
+                if (sfd.ShowDialog() == DialogResult.OK)
+                {
+                    File.WriteAllText(sfd.FileName, sb.ToString(), Encoding.UTF8);
+                    MessageBox.Show(
+                        $"配置文件已生成：\n{sfd.FileName}\n\n" +
+                        $"使用方法：\n" +
+                        $"1. 在 X-AnyLabeling 中点击左侧「AI」按钮\n" +
+                        $"2. 选择「加载自定义模型」\n" +
+                        $"3. 选择此 YAML 文件即可自动标注",
+                        "生成成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+        }
+
+        private void btnReviewCurrentFolder_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(_currentImageFolder) || !Directory.Exists(_currentImageFolder))
+            {
+                MessageBox.Show("请先加载图片目录！");
+                return;
+            }
+
+            OpenCurrentFolderInLabelingTool();
+        }
+
+        private void OpenCurrentFolderInLabelingTool()
+        {
             if (string.IsNullOrEmpty(_currentImageFolder))
             {
                 MessageBox.Show("请先加载图片目录！");
@@ -133,18 +248,6 @@ namespace AudioTraining
             {
                 string toolRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Tools", "X-AnyLabeling");
                 string exePath = Path.Combine(toolRoot, "X-AnyLabeling-CPU.exe");
-
-                //if (File.Exists(exePath))
-                //{
-                //    // Launch X-AnyLabeling with the current image folder
-                //    string args = $"\"{_currentImageFolder}\"";
-
-                //    Process.Start(new ProcessStartInfo(exePath)
-                //    {
-                //        //Arguments = args,
-                //        WorkingDirectory = toolRoot
-                //    });
-                //}
 
                 if (File.Exists(exePath))
                 {
@@ -159,7 +262,7 @@ namespace AudioTraining
                     {
                         //Arguments = args,
                         WorkingDirectory = toolRoot,
-                        UseShellExecute = false // 建议设为false，这样更稳定
+                        UseShellExecute = false
                     };
 
                     try
@@ -188,6 +291,166 @@ namespace AudioTraining
             {
                 MessageBox.Show($"无法启动 X-AnyLabeling: {ex.Message}");
             }
+        }
+
+        private List<string> BatchAutoAnnotateCurrentFolder()
+        {
+            var imageFiles = Directory.GetFiles(_currentImageFolder, "*.*")
+                .Where(s => _imageExtensions.Contains(Path.GetExtension(s).ToLower()))
+                .OrderBy(s => s)
+                .ToList();
+
+            if (imageFiles.Count == 0)
+            {
+                throw new InvalidOperationException("当前目录下没有图片文件。");
+            }
+
+            var classNameById = new Dictionary<int, string>();
+
+            foreach (var imagePath in imageFiles)
+            {
+                using (var bitmap = new Bitmap(imagePath))
+                {
+                    var predictions = RunAutoAnnotationInference(bitmap);
+                    string txtPath = Path.ChangeExtension(imagePath, ".txt");
+                    WritePredictionLabels(txtPath, bitmap.Width, bitmap.Height, predictions);
+
+                    foreach (var prediction in predictions)
+                    {
+                        if (!classNameById.ContainsKey(prediction.ClassId))
+                        {
+                            classNameById[prediction.ClassId] = string.IsNullOrWhiteSpace(prediction.Label)
+                                ? prediction.ClassId.ToString()
+                                : prediction.Label;
+                        }
+                    }
+                }
+            }
+
+            var classes = BuildClassList(classNameById);
+            File.WriteAllLines(Path.Combine(_currentImageFolder, "classes.txt"), classes, Encoding.UTF8);
+            return classes;
+        }
+
+        private List<YoloOBBPrediction> RunAutoAnnotationInference(Bitmap bitmap)
+        {
+            if (_useOBBModel)
+            {
+                if (!_yoloOBBInference.IsModelLoaded)
+                {
+                    throw new InvalidOperationException("OBB 模型未加载。");
+                }
+
+                return _yoloOBBInference.Predict(bitmap, 0.25f);
+            }
+
+            if (!_yoloInference.IsModelLoaded)
+            {
+                throw new InvalidOperationException("标准检测模型未加载。");
+            }
+
+            var stdPredictions = _yoloInference.Predict(bitmap, 0.25f);
+            return stdPredictions.Select(pred => new YoloOBBPrediction
+            {
+                ClassId = pred.ClassId,
+                Label = pred.Label,
+                Confidence = pred.Confidence,
+                Angle = 0,
+                RotatedBox = new PointF[4]
+                {
+                    new PointF(pred.Rectangle.Left, pred.Rectangle.Top),
+                    new PointF(pred.Rectangle.Right, pred.Rectangle.Top),
+                    new PointF(pred.Rectangle.Right, pred.Rectangle.Bottom),
+                    new PointF(pred.Rectangle.Left, pred.Rectangle.Bottom)
+                }
+            }).ToList();
+        }
+
+        private void WritePredictionLabels(string txtPath, int imageWidth, int imageHeight, List<YoloOBBPrediction> predictions)
+        {
+            var lines = new List<string>();
+
+            foreach (var prediction in predictions)
+            {
+                if (prediction?.RotatedBox == null || prediction.RotatedBox.Length < 4)
+                {
+                    continue;
+                }
+
+                if (_useOBBModel)
+                {
+                    var normalizedCorners = prediction.RotatedBox
+                        .Take(4)
+                        .SelectMany(pt => new[]
+                        {
+                            Clamp01(pt.X / imageWidth).ToString("F6"),
+                            Clamp01(pt.Y / imageHeight).ToString("F6")
+                        });
+
+                    lines.Add($"{prediction.ClassId} {string.Join(" ", normalizedCorners)}");
+                }
+                else
+                {
+                    float minX = prediction.RotatedBox.Min(p => p.X);
+                    float maxX = prediction.RotatedBox.Max(p => p.X);
+                    float minY = prediction.RotatedBox.Min(p => p.Y);
+                    float maxY = prediction.RotatedBox.Max(p => p.Y);
+
+                    float centerX = (minX + maxX) / 2f;
+                    float centerY = (minY + maxY) / 2f;
+                    float width = maxX - minX;
+                    float height = maxY - minY;
+
+                    lines.Add($"{prediction.ClassId} {Clamp01(centerX / imageWidth):F6} {Clamp01(centerY / imageHeight):F6} {Clamp01(width / imageWidth):F6} {Clamp01(height / imageHeight):F6}");
+                }
+            }
+
+            File.WriteAllLines(txtPath, lines, Encoding.UTF8);
+        }
+
+        private List<string> BuildClassList(Dictionary<int, string> classNameById)
+        {
+            if (classNameById.Count == 0)
+            {
+                return new List<string>();
+            }
+
+            int maxClassId = classNameById.Keys.Max();
+            var result = new List<string>();
+            for (int i = 0; i <= maxClassId; i++)
+            {
+                result.Add(classNameById.TryGetValue(i, out string className) ? className : i.ToString());
+            }
+
+            return result;
+        }
+
+        private void UpdateAutoAnnotateStatus()
+        {
+            if (lblAutoAnnotateStatus == null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(_currentImageFolder) || !Directory.Exists(_currentImageFolder))
+            {
+                lblAutoAnnotateStatus.Text = "自动标注：未加载目录";
+                return;
+            }
+
+            int imageCount = Directory.GetFiles(_currentImageFolder, "*.*")
+                .Count(s => _imageExtensions.Contains(Path.GetExtension(s).ToLower()));
+            int labelCount = Directory.GetFiles(_currentImageFolder, "*.txt")
+                .Count(s => !string.Equals(Path.GetFileName(s), "classes.txt", StringComparison.OrdinalIgnoreCase));
+
+            lblAutoAnnotateStatus.Text = $"自动标注：图片 {imageCount} / 标签 {labelCount}";
+        }
+
+        private double Clamp01(double value)
+        {
+            if (value < 0) return 0;
+            if (value > 1) return 1;
+            return value;
         }
 
         // ==================== 2. Config & 3. Training ====================
@@ -219,6 +482,24 @@ namespace AudioTraining
         private void chkEnableSeed_CheckedChanged(object sender, EventArgs e)
         {
             numSeed.Enabled = chkEnableSeed.Checked;
+        }
+
+        private void chkContinueTrain_CheckedChanged(object sender, EventArgs e)
+        {
+            txtBaseModelPath.Enabled = chkContinueTrain.Checked;
+            btnBrowseBaseModel.Enabled = chkContinueTrain.Checked;
+        }
+
+        private void btnBrowseBaseModel_Click(object sender, EventArgs e)
+        {
+            using (var ofd = new OpenFileDialog())
+            {
+                ofd.Filter = "PyTorch Model (*.pt)|*.pt|All files (*.*)|*.*";
+                if (ofd.ShowDialog() == DialogResult.OK)
+                {
+                    txtBaseModelPath.Text = ofd.FileName;
+                }
+            }
         }
 
         private async void btnStartTrain_Click(object sender, EventArgs e)
@@ -338,6 +619,23 @@ namespace AudioTraining
             AppendConsole($"模型类型: {(_useOBBModel ? "旋转检测 (OBB)" : "标准检测 (Standard)")}");
             LoggerService.Info($"模型类型: {(_useOBBModel ? "旋转检测 (OBB)" : "标准检测 (Standard)")}");
 
+            string baseModelPath = null;
+            if (chkContinueTrain.Checked)
+            {
+                baseModelPath = txtBaseModelPath.Text.Trim();
+                if (string.IsNullOrWhiteSpace(baseModelPath))
+                {
+                    MessageBox.Show("请先选择已有的 .pt 模型文件！");
+                    return;
+                }
+
+                if (!File.Exists(baseModelPath))
+                {
+                    MessageBox.Show($"基础模型不存在：\n{baseModelPath}");
+                    return;
+                }
+            }
+
             // Setup output directory
             _currentTrainProject = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runs", "detect");
             // Python script handles its own output structure usually, but we pass project path to it or let it use default.
@@ -370,7 +668,7 @@ namespace AudioTraining
             // Get seed value from UI
             int seed = chkEnableSeed.Checked ? (int)numSeed.Value : 0;
             
-            await _trainingProcess.StartTrainingAsync(yamlPath, modelSize, epochs, batch, _currentTrainProject, pythonPath, _useOBBModel, seed);
+            await _trainingProcess.StartTrainingAsync(yamlPath, modelSize, epochs, batch, _currentTrainProject, pythonPath, _useOBBModel, seed, baseModelPath);
         }
 
         // GenerateDataYaml removed as it is now in DatasetManager

@@ -32,7 +32,7 @@ namespace AudioTraining
         
         private StringBuilder _errorBuffer;
 
-        public async Task StartTrainingAsync(string dataYamlPath, string modelSize, int epochs, int batchSize, string projectPath, string pythonPath, bool useOBB = false, int seed = 0)
+        public async Task StartTrainingAsync(string dataYamlPath, string modelSize, int epochs, int batchSize, string projectPath, string pythonPath, bool useOBB = false, int seed = 0, string baseModelPath = null)
         {
             _errorBuffer = new StringBuilder();
             ExitCode = 0;
@@ -50,13 +50,14 @@ namespace AudioTraining
             // Use provided python path or default to "python"
             string pythonExe = string.IsNullOrWhiteSpace(pythonPath) ? "python" : pythonPath;
 
-            // Arguments: <yaml_path> <epochs> <img_size> <model_type> [device] [seed]
+            // Arguments: <yaml_path> <epochs> <img_size> <model_type> <device> <model_size> <batch_size> [seed] [base_model_path]
             int imgSize = 640;
             string modelType = useOBB ? "obb" : "detect";
             string device = "0"; // Default GPU 0
             
-            // Build arguments with optional seed parameter
-            string args = $"\"{scriptPath}\" \"{dataYamlPath}\" {epochs} {imgSize} {modelType} {device}";
+            // Build arguments with required parameters
+            string normalizedModelSize = string.IsNullOrWhiteSpace(modelSize) ? "n" : modelSize.Trim().ToLowerInvariant();
+            string args = $"\"{scriptPath}\" \"{dataYamlPath}\" {epochs} {imgSize} {modelType} {device} {normalizedModelSize} {batchSize}";
             
             // Add seed parameter if specified (> 0 means enabled)
             if (seed > 0)
@@ -69,6 +70,13 @@ namespace AudioTraining
             {
                 OnOutput("Training without fixed seed (non-deterministic mode, faster)");
                 LoggerService.Info($"[Training] Random seed disabled (non-deterministic mode)");
+            }
+
+            if (!string.IsNullOrWhiteSpace(baseModelPath))
+            {
+                args += $" \"{baseModelPath}\"";
+                OnOutput($"Continue training from base model: {baseModelPath}");
+                LoggerService.Info($"[Training] Base model path: {baseModelPath}");
             }
 
             _process = new Process();
