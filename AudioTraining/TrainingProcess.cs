@@ -1,6 +1,7 @@
 using AudioTraining.Services;
 using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -32,7 +33,7 @@ namespace AudioTraining
         
         private StringBuilder _errorBuffer;
 
-        public async Task StartTrainingAsync(string dataYamlPath, string modelSize, int epochs, int batchSize, string projectPath, string pythonPath, bool useOBB = false, int seed = 0, string baseModelPath = null)
+        public async Task StartTrainingAsync(string dataYamlPath, string modelSize, int epochs, int batchSize, string projectPath, string pythonPath, bool useOBB = false, int seed = 0, string baseModelPath = null, int imgSize = 640, double lr0 = 0.001, int patience = 30, bool useMosaic = false, bool useMixup = false)
         {
             _errorBuffer = new StringBuilder();
             ExitCode = 0;
@@ -48,18 +49,19 @@ namespace AudioTraining
 
             string pythonExe = string.IsNullOrWhiteSpace(pythonPath) ? "python" : pythonPath;
 
-            // Arguments: <yaml_path> <epochs> <img_size> <model_type> <device> <model_size> <batch_size> [seed] [base_model_path]
-            int imgSize = 640;
+            // Arguments: <yaml_path> <epochs> <img_size> <model_type> <device> <model_size> <batch_size> [seed] [base_model_path] [lr0] [patience] [mosaic] [mixup]
             string modelType = useOBB ? "obb" : "detect";
             string device = "0";
             
             // Build arguments with required parameters
             string normalizedModelSize = string.IsNullOrWhiteSpace(modelSize) ? "n" : modelSize.Trim().ToLowerInvariant();
             string args = $"\"{scriptPath}\" \"{dataYamlPath}\" {epochs} {imgSize} {modelType} {device} {normalizedModelSize} {batchSize}";
-            
+            args += $" {seed}";
+            args += $" \"{baseModelPath ?? string.Empty}\"";
+            args += $" {lr0.ToString(CultureInfo.InvariantCulture)} {patience} {(useMosaic ? 1 : 0)} {(useMixup ? 1 : 0)}";
+
             if (seed > 0)
             {
-                args += $" {seed}";
                 OnOutput($"Training with fixed random seed: {seed} (reproducible mode)");
                 LoggerService.Info($"[Training] Random seed enabled: {seed}");
             }
@@ -71,10 +73,11 @@ namespace AudioTraining
 
             if (!string.IsNullOrWhiteSpace(baseModelPath))
             {
-                args += $" \"{baseModelPath}\"";
                 OnOutput($"Continue training from base model: {baseModelPath}");
                 LoggerService.Info($"[Training] Base model path: {baseModelPath}");
             }
+
+            OnOutput($"Training params -> imgSize={imgSize}, lr0={lr0.ToString(CultureInfo.InvariantCulture)}, patience={patience}, mosaic={(useMosaic ? 1 : 0)}, mixup={(useMixup ? 1 : 0)}");
 
             _process = new Process();
             _process.StartInfo.FileName = pythonExe;
@@ -177,7 +180,8 @@ namespace AudioTraining
         /// 【需求3】启动增量学习训练（支持层冻结和类别扩展）
         /// </summary>
         public async Task StartIncrementalTrainingAsync(string dataYamlPath, string modelSize, int epochs, int batchSize, 
-            string projectPath, string pythonPath, bool useOBB, string baseModelPath, int freezeLayers, int seed = 0)
+            string projectPath, string pythonPath, bool useOBB, string baseModelPath, int freezeLayers, int seed = 0,
+            int imgSize = 640, double lr0 = 0.001, int patience = 30, bool useMosaic = false, bool useMixup = false)
         {
             _errorBuffer = new StringBuilder();
             ExitCode = 0;
@@ -194,17 +198,15 @@ namespace AudioTraining
 
             string pythonExe = string.IsNullOrWhiteSpace(pythonPath) ? "python" : pythonPath;
 
-            // Arguments: <yaml_path> <epochs> <img_size> <model_type> <device> <model_size> <batch_size> <base_model_path> <freeze_layers> [seed]
-            int imgSize = 640;
+            // Arguments: <yaml_path> <epochs> <img_size> <model_type> <device> <model_size> <batch_size> <base_model_path> <freeze_layers> [seed] [lr0] [patience] [mosaic] [mixup]
             string modelType = useOBB ? "obb" : "detect";
             string device = "0";
             string normalizedModelSize = string.IsNullOrWhiteSpace(modelSize) ? "n" : modelSize.Trim().ToLowerInvariant();
             
-            string args = $"\"{scriptPath}\" \"{dataYamlPath}\" {epochs} {imgSize} {modelType} {device} {normalizedModelSize} {batchSize} \"{baseModelPath}\" {freezeLayers}";
-            
+            string args = $"\"{scriptPath}\" \"{dataYamlPath}\" {epochs} {imgSize} {modelType} {device} {normalizedModelSize} {batchSize} \"{baseModelPath ?? string.Empty}\" {freezeLayers} {seed} {lr0.ToString(CultureInfo.InvariantCulture)} {patience} {(useMosaic ? 1 : 0)} {(useMixup ? 1 : 0)}";
+
             if (seed > 0)
             {
-                args += $" {seed}";
                 OnOutput($"增量训练（可重复模式）- 随机种子: {seed}");
                 LoggerService.Info($"[IncrementalTraining] Random seed enabled: {seed}");
             }
@@ -216,6 +218,7 @@ namespace AudioTraining
 
             OnOutput($"增量学习模式 - 基础模型: {Path.GetFileName(baseModelPath)}");
             OnOutput($"增量学习模式 - 冻结层数: {freezeLayers}");
+            OnOutput($"增量训练参数 -> imgSize={imgSize}, lr0={lr0.ToString(CultureInfo.InvariantCulture)}, patience={patience}, mosaic={(useMosaic ? 1 : 0)}, mixup={(useMixup ? 1 : 0)}");
             LoggerService.Info($"[IncrementalTraining] Base model: {baseModelPath}");
             LoggerService.Info($"[IncrementalTraining] Freeze layers: {freezeLayers}");
 

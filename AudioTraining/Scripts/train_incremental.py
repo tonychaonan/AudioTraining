@@ -10,6 +10,24 @@ import numpy as np
 import torch
 import yaml
 
+
+def _parse_int_arg(argv, index, default=None):
+    if len(argv) <= index:
+        return default
+    try:
+        return int(argv[index])
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_float_arg(argv, index, default):
+    if len(argv) <= index:
+        return default
+    try:
+        return float(argv[index])
+    except (TypeError, ValueError):
+        return default
+
 def set_seed(seed):
     """设置所有随机种子以确保训练可重复性"""
     print(f"--- Setting random seed to {seed} for reproducibility ---")
@@ -106,7 +124,7 @@ def verify_class_compatibility(yaml_path, base_model_path):
 
 def main():
     if len(sys.argv) < 10:
-        print("Usage: python train_incremental.py <yaml_path> <epochs> <img_size> <model_type> <device> <model_size> <batch_size> <base_model_path> <freeze_layers> [seed]")
+        print("Usage: python train_incremental.py <yaml_path> <epochs> <img_size> <model_type> <device> <model_size> <batch_size> <base_model_path> <freeze_layers> [seed] [lr0] [patience] [mosaic] [mixup]")
         print("  freeze_layers: 要冻结的层数 (0=不冻结, 10=冻结前10层, -1=冻结整个backbone)")
         return
 
@@ -121,14 +139,15 @@ def main():
     freeze_layers_count = int(sys.argv[9])
     
     seed = None
-    if len(sys.argv) > 10:
-        try:
-            seed_value = int(sys.argv[10])
-            if seed_value > 0:
-                seed = seed_value
-                set_seed(seed)
-        except ValueError:
-            pass
+    seed_value = _parse_int_arg(sys.argv, 10, None)
+    if seed_value is not None and seed_value > 0:
+        seed = seed_value
+        set_seed(seed)
+
+    lr0 = _parse_float_arg(sys.argv, 11, 0.001)
+    patience = _parse_int_arg(sys.argv, 12, 30)
+    mosaic = _parse_float_arg(sys.argv, 13, 0.0)
+    mixup = _parse_float_arg(sys.argv, 14, 0.0)
 
     # 验证类别兼容性
     print("=== Verifying class compatibility for incremental learning ===")
@@ -161,6 +180,7 @@ def main():
     
     print(f"--- Starting incremental training ({epochs_count} epochs, size {img_size}) ---")
     print(f"--- Freeze strategy: {freeze_layers_count} layers ---")
+    print(f"--- Training params: lr0={lr0}, patience={patience}, mosaic={mosaic}, mixup={mixup} ---")
 
     project_path = os.path.join(os.getcwd(), 'train_output')
     exp_name = 'incremental_exp'
@@ -176,8 +196,11 @@ def main():
         'device': device,
         'exist_ok': True,
         'workers': 0,
-        'lr0': 0.001,  # 更小的初始学习率（增量学习推荐）
-        'lrf': 0.01    # 最终学习率因子
+        'lr0': lr0,
+        'patience': patience,
+        'mosaic': mosaic,
+        'mixup': mixup,
+        'lrf': 0.01
     }
     
     if seed is not None:

@@ -28,9 +28,9 @@
         /// </summary>
         private void InitializeComponent()
         {
-            System.Windows.Forms.DataVisualization.Charting.ChartArea chartArea2 = new System.Windows.Forms.DataVisualization.Charting.ChartArea();
-            System.Windows.Forms.DataVisualization.Charting.Legend legend2 = new System.Windows.Forms.DataVisualization.Charting.Legend();
-            System.Windows.Forms.DataVisualization.Charting.Series series2 = new System.Windows.Forms.DataVisualization.Charting.Series();
+            System.Windows.Forms.DataVisualization.Charting.ChartArea chartArea1 = new System.Windows.Forms.DataVisualization.Charting.ChartArea();
+            System.Windows.Forms.DataVisualization.Charting.Legend legend1 = new System.Windows.Forms.DataVisualization.Charting.Legend();
+            System.Windows.Forms.DataVisualization.Charting.Series series1 = new System.Windows.Forms.DataVisualization.Charting.Series();
             this.tabControl1 = new System.Windows.Forms.TabControl();
             this.tabData = new System.Windows.Forms.TabPage();
             this.splitContainerData = new System.Windows.Forms.SplitContainer();
@@ -60,6 +60,19 @@
             this.label2 = new System.Windows.Forms.Label();
             this.numEpochs = new System.Windows.Forms.NumericUpDown();
             this.label1 = new System.Windows.Forms.Label();
+            this.chkEnableIncrementalMode = new System.Windows.Forms.CheckBox();
+            this.labelFreezeLayers = new System.Windows.Forms.Label();
+            this.numFreezeLayers = new System.Windows.Forms.NumericUpDown();
+            this.labelLearningRate = new System.Windows.Forms.Label();
+            this.numLearningRate = new System.Windows.Forms.NumericUpDown();
+            this.labelImgSize = new System.Windows.Forms.Label();
+            this.numImgSize = new System.Windows.Forms.NumericUpDown();
+            this.labelPatience = new System.Windows.Forms.Label();
+            this.numPatience = new System.Windows.Forms.NumericUpDown();
+            this.chkMosaic = new System.Windows.Forms.CheckBox();
+            this.chkMixup = new System.Windows.Forms.CheckBox();
+            this.labelValSplit = new System.Windows.Forms.Label();
+            this.numValSplit = new System.Windows.Forms.NumericUpDown();
             this.grpModel = new System.Windows.Forms.GroupBox();
             this.cmbModelType = new System.Windows.Forms.ComboBox();
             this.labelModelType = new System.Windows.Forms.Label();
@@ -93,6 +106,11 @@
             ((System.ComponentModel.ISupportInitialize)(this.numSeed)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numBatchSize)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numEpochs)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numFreezeLayers)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numLearningRate)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numImgSize)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numPatience)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numValSplit)).BeginInit();
             this.grpModel.SuspendLayout();
             this.tabTrain.SuspendLayout();
             this.tableLayoutPanelTrain.SuspendLayout();
@@ -117,7 +135,7 @@
             this.tabControl1.Location = new System.Drawing.Point(0, 0);
             this.tabControl1.Name = "tabControl1";
             this.tabControl1.SelectedIndex = 0;
-            this.tabControl1.Size = new System.Drawing.Size(984, 661);
+            this.tabControl1.Size = new System.Drawing.Size(984, 802);
             this.tabControl1.TabIndex = 0;
             // 
             // tabData
@@ -127,7 +145,7 @@
             this.tabData.Location = new System.Drawing.Point(4, 25);
             this.tabData.Name = "tabData";
             this.tabData.Padding = new System.Windows.Forms.Padding(3);
-            this.tabData.Size = new System.Drawing.Size(976, 632);
+            this.tabData.Size = new System.Drawing.Size(976, 773);
             this.tabData.TabIndex = 0;
             this.tabData.Text = "1. 数据标注";
             this.tabData.UseVisualStyleBackColor = true;
@@ -145,7 +163,7 @@
             // splitContainerData.Panel2
             // 
             this.splitContainerData.Panel2.Controls.Add(this.picPreview);
-            this.splitContainerData.Size = new System.Drawing.Size(970, 531);
+            this.splitContainerData.Size = new System.Drawing.Size(970, 672);
             this.splitContainerData.SplitterDistance = 250;
             this.splitContainerData.TabIndex = 1;
             // 
@@ -156,7 +174,7 @@
             this.lstImages.ItemHeight = 15;
             this.lstImages.Location = new System.Drawing.Point(0, 0);
             this.lstImages.Name = "lstImages";
-            this.lstImages.Size = new System.Drawing.Size(250, 531);
+            this.lstImages.Size = new System.Drawing.Size(250, 672);
             this.lstImages.TabIndex = 0;
             this.lstImages.SelectedIndexChanged += new System.EventHandler(this.lstImages_SelectedIndexChanged);
             // 
@@ -166,7 +184,7 @@
             this.picPreview.Dock = System.Windows.Forms.DockStyle.Fill;
             this.picPreview.Location = new System.Drawing.Point(0, 0);
             this.picPreview.Name = "picPreview";
-            this.picPreview.Size = new System.Drawing.Size(716, 531);
+            this.picPreview.Size = new System.Drawing.Size(716, 672);
             this.picPreview.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.picPreview.TabIndex = 0;
             this.picPreview.TabStop = false;
@@ -251,7 +269,7 @@
             this.tabConfig.Location = new System.Drawing.Point(4, 25);
             this.tabConfig.Name = "tabConfig";
             this.tabConfig.Padding = new System.Windows.Forms.Padding(3);
-            this.tabConfig.Size = new System.Drawing.Size(976, 632);
+            this.tabConfig.Size = new System.Drawing.Size(976, 773);
             this.tabConfig.TabIndex = 1;
             this.tabConfig.Text = "2. 模型配置";
             this.tabConfig.UseVisualStyleBackColor = true;
@@ -273,9 +291,22 @@
             this.grpTrainParams.Controls.Add(this.label2);
             this.grpTrainParams.Controls.Add(this.numEpochs);
             this.grpTrainParams.Controls.Add(this.label1);
+            this.grpTrainParams.Controls.Add(this.chkEnableIncrementalMode);
+            this.grpTrainParams.Controls.Add(this.labelFreezeLayers);
+            this.grpTrainParams.Controls.Add(this.numFreezeLayers);
+            this.grpTrainParams.Controls.Add(this.labelLearningRate);
+            this.grpTrainParams.Controls.Add(this.numLearningRate);
+            this.grpTrainParams.Controls.Add(this.labelImgSize);
+            this.grpTrainParams.Controls.Add(this.numImgSize);
+            this.grpTrainParams.Controls.Add(this.labelPatience);
+            this.grpTrainParams.Controls.Add(this.numPatience);
+            this.grpTrainParams.Controls.Add(this.chkMosaic);
+            this.grpTrainParams.Controls.Add(this.chkMixup);
+            this.grpTrainParams.Controls.Add(this.labelValSplit);
+            this.grpTrainParams.Controls.Add(this.numValSplit);
             this.grpTrainParams.Location = new System.Drawing.Point(20, 160);
             this.grpTrainParams.Name = "grpTrainParams";
-            this.grpTrainParams.Size = new System.Drawing.Size(628, 302);
+            this.grpTrainParams.Size = new System.Drawing.Size(948, 497);
             this.grpTrainParams.TabIndex = 1;
             this.grpTrainParams.TabStop = false;
             this.grpTrainParams.Text = "训练参数";
@@ -400,7 +431,7 @@
             // 
             // numBatchSize
             // 
-            this.numBatchSize.Location = new System.Drawing.Point(110, 75);
+            this.numBatchSize.Location = new System.Drawing.Point(135, 83);
             this.numBatchSize.Maximum = new decimal(new int[] {
             512,
             0,
@@ -423,11 +454,11 @@
             // label2
             // 
             this.label2.AutoSize = true;
-            this.label2.Location = new System.Drawing.Point(20, 77);
+            this.label2.Location = new System.Drawing.Point(2, 85);
             this.label2.Name = "label2";
-            this.label2.Size = new System.Drawing.Size(95, 15);
+            this.label2.Size = new System.Drawing.Size(127, 15);
             this.label2.TabIndex = 2;
-            this.label2.Text = "Batch Size:";
+            this.label2.Text = "单次训练图片张数";
             // 
             // numEpochs
             // 
@@ -456,9 +487,203 @@
             this.label1.AutoSize = true;
             this.label1.Location = new System.Drawing.Point(20, 37);
             this.label1.Name = "label1";
-            this.label1.Size = new System.Drawing.Size(63, 15);
+            this.label1.Size = new System.Drawing.Size(67, 15);
             this.label1.TabIndex = 0;
-            this.label1.Text = "Epochs:";
+            this.label1.Text = "训练轮数";
+            // 
+            // chkEnableIncrementalMode
+            // 
+            this.chkEnableIncrementalMode.AutoSize = true;
+            this.chkEnableIncrementalMode.Enabled = false;
+            this.chkEnableIncrementalMode.Location = new System.Drawing.Point(203, 190);
+            this.chkEnableIncrementalMode.Name = "chkEnableIncrementalMode";
+            this.chkEnableIncrementalMode.Size = new System.Drawing.Size(337, 19);
+            this.chkEnableIncrementalMode.TabIndex = 15;
+            this.chkEnableIncrementalMode.Text = "启用增量学习模式（保留旧类别+学习新类别）";
+            this.chkEnableIncrementalMode.UseVisualStyleBackColor = true;
+            // 
+            // labelFreezeLayers
+            // 
+            this.labelFreezeLayers.AutoSize = true;
+            this.labelFreezeLayers.Location = new System.Drawing.Point(422, 247);
+            this.labelFreezeLayers.Name = "labelFreezeLayers";
+            this.labelFreezeLayers.Size = new System.Drawing.Size(75, 15);
+            this.labelFreezeLayers.TabIndex = 16;
+            this.labelFreezeLayers.Text = "冻结层数:";
+            // 
+            // numFreezeLayers
+            // 
+            this.numFreezeLayers.Enabled = false;
+            this.numFreezeLayers.Location = new System.Drawing.Point(514, 245);
+            this.numFreezeLayers.Maximum = new decimal(new int[] {
+            50,
+            0,
+            0,
+            0});
+            this.numFreezeLayers.Name = "numFreezeLayers";
+            this.numFreezeLayers.Size = new System.Drawing.Size(80, 25);
+            this.numFreezeLayers.TabIndex = 17;
+            this.numFreezeLayers.Value = new decimal(new int[] {
+            10,
+            0,
+            0,
+            0});
+            // 
+            // labelLearningRate
+            // 
+            this.labelLearningRate.AutoSize = true;
+            this.labelLearningRate.Location = new System.Drawing.Point(20, 245);
+            this.labelLearningRate.Name = "labelLearningRate";
+            this.labelLearningRate.Size = new System.Drawing.Size(92, 15);
+            this.labelLearningRate.TabIndex = 19;
+            this.labelLearningRate.Text = "学习率 lr0:";
+            // 
+            // numLearningRate
+            // 
+            this.numLearningRate.DecimalPlaces = 4;
+            this.numLearningRate.Increment = new decimal(new int[] {
+            5,
+            0,
+            0,
+            196608});
+            this.numLearningRate.Location = new System.Drawing.Point(120, 243);
+            this.numLearningRate.Maximum = new decimal(new int[] {
+            1,
+            0,
+            0,
+            65536});
+            this.numLearningRate.Minimum = new decimal(new int[] {
+            1,
+            0,
+            0,
+            262144});
+            this.numLearningRate.Name = "numLearningRate";
+            this.numLearningRate.Size = new System.Drawing.Size(120, 25);
+            this.numLearningRate.TabIndex = 20;
+            this.numLearningRate.Value = new decimal(new int[] {
+            10,
+            0,
+            0,
+            262144});
+            // 
+            // labelImgSize
+            // 
+            this.labelImgSize.AutoSize = true;
+            this.labelImgSize.Location = new System.Drawing.Point(20, 282);
+            this.labelImgSize.Name = "labelImgSize";
+            this.labelImgSize.Size = new System.Drawing.Size(147, 15);
+            this.labelImgSize.TabIndex = 21;
+            this.labelImgSize.Text = "输入尺寸 img size:";
+            // 
+            // numImgSize
+            // 
+            this.numImgSize.Increment = new decimal(new int[] {
+            32,
+            0,
+            0,
+            0});
+            this.numImgSize.Location = new System.Drawing.Point(182, 280);
+            this.numImgSize.Maximum = new decimal(new int[] {
+            1536,
+            0,
+            0,
+            0});
+            this.numImgSize.Minimum = new decimal(new int[] {
+            320,
+            0,
+            0,
+            0});
+            this.numImgSize.Name = "numImgSize";
+            this.numImgSize.Size = new System.Drawing.Size(95, 25);
+            this.numImgSize.TabIndex = 22;
+            this.numImgSize.Value = new decimal(new int[] {
+            960,
+            0,
+            0,
+            0});
+            // 
+            // labelPatience
+            // 
+            this.labelPatience.AutoSize = true;
+            this.labelPatience.Location = new System.Drawing.Point(418, 284);
+            this.labelPatience.Name = "labelPatience";
+            this.labelPatience.Size = new System.Drawing.Size(79, 15);
+            this.labelPatience.TabIndex = 23;
+            this.labelPatience.Text = "patience:";
+            // 
+            // numPatience
+            // 
+            this.numPatience.Location = new System.Drawing.Point(514, 282);
+            this.numPatience.Minimum = new decimal(new int[] {
+            1,
+            0,
+            0,
+            0});
+            this.numPatience.Name = "numPatience";
+            this.numPatience.Size = new System.Drawing.Size(80, 25);
+            this.numPatience.TabIndex = 24;
+            this.numPatience.Value = new decimal(new int[] {
+            30,
+            0,
+            0,
+            0});
+            // 
+            // chkMosaic
+            // 
+            this.chkMosaic.AutoSize = true;
+            this.chkMosaic.Location = new System.Drawing.Point(20, 318);
+            this.chkMosaic.Name = "chkMosaic";
+            this.chkMosaic.Size = new System.Drawing.Size(77, 19);
+            this.chkMosaic.TabIndex = 25;
+            this.chkMosaic.Text = "Mosaic";
+            this.chkMosaic.UseVisualStyleBackColor = true;
+            // 
+            // chkMixup
+            // 
+            this.chkMixup.AutoSize = true;
+            this.chkMixup.Location = new System.Drawing.Point(120, 318);
+            this.chkMixup.Name = "chkMixup";
+            this.chkMixup.Size = new System.Drawing.Size(69, 19);
+            this.chkMixup.TabIndex = 26;
+            this.chkMixup.Text = "MixUp";
+            this.chkMixup.UseVisualStyleBackColor = true;
+            // 
+            // labelValSplit
+            // 
+            this.labelValSplit.AutoSize = true;
+            this.labelValSplit.Location = new System.Drawing.Point(20, 353);
+            this.labelValSplit.Name = "labelValSplit";
+            this.labelValSplit.Size = new System.Drawing.Size(90, 15);
+            this.labelValSplit.TabIndex = 27;
+            this.labelValSplit.Text = "验证集比例:";
+            // 
+            // numValSplit
+            // 
+            this.numValSplit.DecimalPlaces = 2;
+            this.numValSplit.Increment = new decimal(new int[] {
+            5,
+            0,
+            0,
+            131072});
+            this.numValSplit.Location = new System.Drawing.Point(120, 351);
+            this.numValSplit.Maximum = new decimal(new int[] {
+            40,
+            0,
+            0,
+            131072});
+            this.numValSplit.Minimum = new decimal(new int[] {
+            5,
+            0,
+            0,
+            131072});
+            this.numValSplit.Name = "numValSplit";
+            this.numValSplit.Size = new System.Drawing.Size(80, 25);
+            this.numValSplit.TabIndex = 28;
+            this.numValSplit.Value = new decimal(new int[] {
+            20,
+            0,
+            0,
+            131072});
             // 
             // grpModel
             // 
@@ -522,7 +747,7 @@
             this.tabTrain.Controls.Add(this.panelTrainTop);
             this.tabTrain.Location = new System.Drawing.Point(4, 25);
             this.tabTrain.Name = "tabTrain";
-            this.tabTrain.Size = new System.Drawing.Size(976, 632);
+            this.tabTrain.Size = new System.Drawing.Size(976, 773);
             this.tabTrain.TabIndex = 2;
             this.tabTrain.Text = "3. 训练监控";
             this.tabTrain.UseVisualStyleBackColor = true;
@@ -539,24 +764,24 @@
             this.tableLayoutPanelTrain.RowCount = 2;
             this.tableLayoutPanelTrain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 50F));
             this.tableLayoutPanelTrain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 50F));
-            this.tableLayoutPanelTrain.Size = new System.Drawing.Size(976, 572);
+            this.tableLayoutPanelTrain.Size = new System.Drawing.Size(976, 713);
             this.tableLayoutPanelTrain.TabIndex = 1;
             // 
             // chartLoss
             // 
-            chartArea2.Name = "ChartArea1";
-            this.chartLoss.ChartAreas.Add(chartArea2);
+            chartArea1.Name = "ChartArea1";
+            this.chartLoss.ChartAreas.Add(chartArea1);
             this.chartLoss.Dock = System.Windows.Forms.DockStyle.Fill;
-            legend2.Name = "Legend1";
-            this.chartLoss.Legends.Add(legend2);
+            legend1.Name = "Legend1";
+            this.chartLoss.Legends.Add(legend1);
             this.chartLoss.Location = new System.Drawing.Point(3, 3);
             this.chartLoss.Name = "chartLoss";
-            series2.ChartArea = "ChartArea1";
-            series2.ChartType = System.Windows.Forms.DataVisualization.Charting.SeriesChartType.Line;
-            series2.Legend = "Legend1";
-            series2.Name = "Loss";
-            this.chartLoss.Series.Add(series2);
-            this.chartLoss.Size = new System.Drawing.Size(970, 280);
+            series1.ChartArea = "ChartArea1";
+            series1.ChartType = System.Windows.Forms.DataVisualization.Charting.SeriesChartType.Line;
+            series1.Legend = "Legend1";
+            series1.Name = "Loss";
+            this.chartLoss.Series.Add(series1);
+            this.chartLoss.Size = new System.Drawing.Size(970, 350);
             this.chartLoss.TabIndex = 0;
             this.chartLoss.Text = "chart1";
             // 
@@ -566,10 +791,10 @@
             this.txtConsole.Dock = System.Windows.Forms.DockStyle.Fill;
             this.txtConsole.Font = new System.Drawing.Font("Consolas", 10F);
             this.txtConsole.ForeColor = System.Drawing.Color.Lime;
-            this.txtConsole.Location = new System.Drawing.Point(3, 289);
+            this.txtConsole.Location = new System.Drawing.Point(3, 359);
             this.txtConsole.Name = "txtConsole";
             this.txtConsole.ReadOnly = true;
-            this.txtConsole.Size = new System.Drawing.Size(970, 280);
+            this.txtConsole.Size = new System.Drawing.Size(970, 351);
             this.txtConsole.TabIndex = 1;
             this.txtConsole.Text = "";
             // 
@@ -610,7 +835,7 @@
             this.tabValid.Controls.Add(this.panelValidTop);
             this.tabValid.Location = new System.Drawing.Point(4, 25);
             this.tabValid.Name = "tabValid";
-            this.tabValid.Size = new System.Drawing.Size(976, 632);
+            this.tabValid.Size = new System.Drawing.Size(976, 773);
             this.tabValid.TabIndex = 3;
             this.tabValid.Text = "4. 模型验证";
             this.tabValid.UseVisualStyleBackColor = true;
@@ -628,7 +853,7 @@
             // splitContainerValid.Panel2
             // 
             this.splitContainerValid.Panel2.Controls.Add(this.txtValidResult);
-            this.splitContainerValid.Size = new System.Drawing.Size(976, 572);
+            this.splitContainerValid.Size = new System.Drawing.Size(976, 713);
             this.splitContainerValid.SplitterDistance = 700;
             this.splitContainerValid.TabIndex = 1;
             // 
@@ -638,7 +863,7 @@
             this.picValidPreview.Dock = System.Windows.Forms.DockStyle.Fill;
             this.picValidPreview.Location = new System.Drawing.Point(0, 0);
             this.picValidPreview.Name = "picValidPreview";
-            this.picValidPreview.Size = new System.Drawing.Size(700, 572);
+            this.picValidPreview.Size = new System.Drawing.Size(700, 713);
             this.picValidPreview.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.picValidPreview.TabIndex = 0;
             this.picValidPreview.TabStop = false;
@@ -650,7 +875,7 @@
             this.txtValidResult.Multiline = true;
             this.txtValidResult.Name = "txtValidResult";
             this.txtValidResult.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.txtValidResult.Size = new System.Drawing.Size(272, 572);
+            this.txtValidResult.Size = new System.Drawing.Size(272, 713);
             this.txtValidResult.TabIndex = 0;
             // 
             // panelValidTop
@@ -700,7 +925,7 @@
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(984, 661);
+            this.ClientSize = new System.Drawing.Size(984, 802);
             this.Controls.Add(this.tabControl1);
             this.Name = "Form1";
             this.Text = "Audio Training Toolbox";
@@ -719,6 +944,11 @@
             ((System.ComponentModel.ISupportInitialize)(this.numSeed)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numBatchSize)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numEpochs)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numFreezeLayers)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numLearningRate)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numImgSize)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numPatience)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numValSplit)).EndInit();
             this.grpModel.ResumeLayout(false);
             this.grpModel.PerformLayout();
             this.tabTrain.ResumeLayout(false);
@@ -768,6 +998,19 @@
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.NumericUpDown numEpochs;
         private System.Windows.Forms.Label label1;
+        private System.Windows.Forms.CheckBox chkEnableIncrementalMode;
+        private System.Windows.Forms.Label labelFreezeLayers;
+        private System.Windows.Forms.NumericUpDown numFreezeLayers;
+        private System.Windows.Forms.Label labelLearningRate;
+        private System.Windows.Forms.NumericUpDown numLearningRate;
+        private System.Windows.Forms.Label labelImgSize;
+        private System.Windows.Forms.NumericUpDown numImgSize;
+        private System.Windows.Forms.Label labelPatience;
+        private System.Windows.Forms.NumericUpDown numPatience;
+        private System.Windows.Forms.CheckBox chkMosaic;
+        private System.Windows.Forms.CheckBox chkMixup;
+        private System.Windows.Forms.Label labelValSplit;
+        private System.Windows.Forms.NumericUpDown numValSplit;
         private System.Windows.Forms.GroupBox grpModel;
         private System.Windows.Forms.ComboBox cmbModelSize;
         private System.Windows.Forms.Label label3;

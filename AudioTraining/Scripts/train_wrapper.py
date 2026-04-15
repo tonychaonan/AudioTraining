@@ -5,6 +5,22 @@ import random
 import numpy as np
 import torch
 
+def _parse_int_arg(argv, index, default=None):
+    if len(argv) <= index:
+        return default
+    try:
+        return int(argv[index])
+    except (TypeError, ValueError):
+        return default
+
+def _parse_float_arg(argv, index, default):
+    if len(argv) <= index:
+        return default
+    try:
+        return float(argv[index])
+    except (TypeError, ValueError):
+        return default
+
 def set_seed(seed):
     """设置所有随机种子以确保训练可重复性"""
     print(f"--- Setting random seed to {seed} for reproducibility ---")
@@ -24,7 +40,7 @@ def set_seed(seed):
 
 def main():
     if len(sys.argv) < 8:
-        print("Usage: python train_wrapper.py <yaml_path> <epochs> <img_size> <model_type> <device> <model_size> <batch_size> [seed] [base_model_path]")
+        print("Usage: python train_wrapper.py <yaml_path> <epochs> <img_size> <model_type> <device> <model_size> <batch_size> [seed] [base_model_path] [lr0] [patience] [mosaic] [mixup]")
         return
 
     yaml_path = sys.argv[1]
@@ -36,22 +52,23 @@ def main():
     batch_size = int(sys.argv[7])
     
     seed = None
-    if len(sys.argv) > 8:
-        try:
-            seed_value = int(sys.argv[8])
-            if seed_value > 0:
-                seed = seed_value
-                set_seed(seed)
-            else:
-                print("--- Random seed disabled (seed <= 0), training will be non-deterministic ---")
-        except ValueError:
-            print("--- Invalid seed value, training will be non-deterministic ---")
+    seed_value = _parse_int_arg(sys.argv, 8, None)
+    if seed_value is not None and seed_value > 0:
+        seed = seed_value
+        set_seed(seed)
+    elif len(sys.argv) > 8:
+        print("--- Random seed disabled (seed <= 0), training will be non-deterministic ---")
 
     base_model_path = None
     if len(sys.argv) > 9:
-        candidate_path = sys.argv[9]
+        candidate_path = sys.argv[9].strip()
         if candidate_path and os.path.exists(candidate_path):
             base_model_path = candidate_path
+
+    lr0 = _parse_float_arg(sys.argv, 10, 0.001)
+    patience = _parse_int_arg(sys.argv, 11, 30)
+    mosaic = _parse_float_arg(sys.argv, 12, 0.0)
+    mixup = _parse_float_arg(sys.argv, 13, 0.0)
 
     print("--- Python Engine: Loading Model ---")
     if base_model_path:
@@ -67,6 +84,7 @@ def main():
         model = YOLO(model_file)
 
     print(f"--- Python Engine: Start Training ({epochs_count} epochs, size {img_size}) ---")
+    print(f"--- Training params: lr0={lr0}, patience={patience}, mosaic={mosaic}, mixup={mixup} ---")
 
     project_path = os.path.join(os.getcwd(), 'train_output')
     exp_name = 'current_exp'  
@@ -81,7 +99,11 @@ def main():
         'name': exp_name,
         'device': device,
         'exist_ok': True,  
-        'workers': 0      
+        'workers': 0,
+        'lr0': lr0,
+        'patience': patience,
+        'mosaic': mosaic,
+        'mixup': mixup
     }
     
     # 如果设置了随机种子，添加到训练参数中

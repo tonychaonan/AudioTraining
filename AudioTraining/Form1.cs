@@ -37,10 +37,8 @@ namespace AudioTraining
         
         // 增量学习相关字段 (需求3)
         private IncrementalClassMapper _incrementalClassMapper;
-        private CheckBox chkEnableIncrementalMode;
-        private NumericUpDown numFreezeLayers;
-        private Label lblIncrementalTip;
         private bool _isIncrementalMode = false;
+        private ToolTip _trainParamToolTip;
 
         public Form1()
         {
@@ -60,8 +58,18 @@ namespace AudioTraining
             _yoloInference = new YoloInference();
             _yoloOBBInference = new YoloOBBInference();
             _incrementalClassMapper = new IncrementalClassMapper();
+
+            _trainParamToolTip = new ToolTip
+            {
+                AutoPopDelay = 20000,
+                InitialDelay = 500,
+                ReshowDelay = 100,
+                ShowAlways = true,
+                ToolTipTitle = "训练调参提示"
+            };
             
             // 初始化增量学习UI控件 (需求3)
+            InitializeTrainingParameterControls();
             InitializeIncrementalLearningControls();
 
             _monitorTimer = new Timer();
@@ -85,49 +93,36 @@ namespace AudioTraining
         /// <summary>
         /// 初始化增量学习UI控件 (需求3)
         /// </summary>
+        private void InitializeTrainingParameterControls()
+        {
+            ApplyTrainingToolTips();
+        }
+
+        private void ApplyTrainingToolTips()
+        {
+            if (_trainParamToolTip == null) return;
+
+            _trainParamToolTip.SetToolTip(numEpochs, "建议先用 100。400 张样本通常 80~120 够用，太大容易过拟合。");
+            _trainParamToolTip.SetToolTip(numBatchSize, "建议 4~8。显存足够可试 8，太大容易不稳定。");
+            _trainParamToolTip.SetToolTip(cmbModelSize, "推荐先用 s；n 更快但能力弱，m 更强但更吃显存。");
+            _trainParamToolTip.SetToolTip(cmbModelType, "普通外观检测选 Standard；需要旋转框/方向关系选 OBB。");
+            _trainParamToolTip.SetToolTip(chkContinueTrain, "必须勾选后才能从旧模型继续训练；增量学习也依赖它。");
+            _trainParamToolTip.SetToolTip(numLearningRate, "增量训练建议 0.0005~0.0015。默认 0.001；太大容易冲坏旧模型。") ;
+            _trainParamToolTip.SetToolTip(numImgSize, "边缘和细节检测建议 960；显存不够时降到 640。目标越细，越不建议过低分辨率。");
+            _trainParamToolTip.SetToolTip(numPatience, "建议 20~40。小样本增量训练常用 30，太大只会浪费时间。");
+            _trainParamToolTip.SetToolTip(chkMosaic, "几何关系/细边缘任务建议先关闭；如果泛化不足再开启。") ;
+            _trainParamToolTip.SetToolTip(chkMixup, "工业缺陷和细节任务通常关闭；只有外观差异很大时再开启。");
+            _trainParamToolTip.SetToolTip(numValSplit, "建议 0.15~0.20。400 张样本至少要留出一部分临界样本做验证。");
+            _trainParamToolTip.SetToolTip(numSeed, "开启后训练可重复，便于对比参数。正式上线时可关闭。") ;
+            _trainParamToolTip.SetToolTip(txtBaseModelPath, "选择旧模型 .pt。增量训练必须基于可靠的基础模型。");
+            _trainParamToolTip.SetToolTip(txtDataYaml, "数据配置文件。训练前会根据验证集比例自动重建。") ;
+            _trainParamToolTip.SetToolTip(txtPythonPath, "Python 解释器路径，确保已安装 ultralytics 和依赖。") ;
+        }
+
         private void InitializeIncrementalLearningControls()
         {
-            // 创建增量学习模式复选框
-            chkEnableIncrementalMode = new CheckBox
-            {
-                Text = "启用增量学习模式（保留旧类别+学习新类别）",
-                Location = new Point(200, 205),
-                AutoSize = true,
-                Enabled = false
-            };
             chkEnableIncrementalMode.CheckedChanged += ChkEnableIncrementalMode_CheckedChanged;
-            grpTrainParams.Controls.Add(chkEnableIncrementalMode);
-            
-            // 创建冻结层数数值框
-            Label lblFreezeLayers = new Label
-            {
-                Text = "冻结层数:",
-                Location = new Point(200, 270),
-                AutoSize = true
-            };
-            grpTrainParams.Controls.Add(lblFreezeLayers);
-            
-            numFreezeLayers = new NumericUpDown
-            {
-                Location = new Point(280, 267),
-                Width = 80,
-                Minimum = 0,
-                Maximum = 50,
-                Value = 10,
-                Enabled = false
-            };
-            grpTrainParams.Controls.Add(numFreezeLayers);
-            
-            // 创建提示文本
-            lblIncrementalTip = new Label
-            {
-                Text = "增量学习：冻结模型前N层，仅训练检测头和新类别",
-                Location = new Point(370, 270),
-                AutoSize = true,
-                ForeColor = Color.Gray,
-                Visible = false
-            };
-            grpTrainParams.Controls.Add(lblIncrementalTip);
+            numFreezeLayers.Enabled = false;
         }
 
         private void btnLoadFolder_Click(object sender, EventArgs e)
@@ -823,7 +818,6 @@ namespace AudioTraining
         {
             _isIncrementalMode = chkEnableIncrementalMode.Checked;
             numFreezeLayers.Enabled = _isIncrementalMode;
-            lblIncrementalTip.Visible = _isIncrementalMode;
             
             if (_isIncrementalMode)
             {
@@ -875,6 +869,7 @@ namespace AudioTraining
             {
                 // 1. Validate X-AnyLabeling annotations
                 string workspaceRoot = BuildIncrementalTrainingWorkspace(_currentImageFolder, out string classesFile);
+                //float valSplit = (float)numValSplit.Value;
                 
                 // Check if classes.txt exists (required by X-AnyLabeling)
                 if (!File.Exists(classesFile))
@@ -944,7 +939,8 @@ namespace AudioTraining
                 AppendConsole("正在整理数据集目录结构 (Train/Val Split)...");
                 // Use DatasetManager to create Dataset_Prepared folder
                 string workspaceRoot = BuildIncrementalTrainingWorkspace(_currentImageFolder, out string classesFile);
-                datasetRoot = await Task.Run(() => DatasetManager.PrepareDataset(workspaceRoot, classesFile));
+                float valSplit1 = (float)numValSplit.Value;
+                datasetRoot = await Task.Run(() => DatasetManager.PrepareDataset(workspaceRoot, classesFile, valSplit1));
                 yamlPath = Path.Combine(datasetRoot, "data.yaml");
                 AppendConsole($"数据集整理完成: {datasetRoot}");
                 AppendConsole($"配置文件生成: {yamlPath}");
@@ -965,10 +961,17 @@ namespace AudioTraining
 
             int epochs = (int)numEpochs.Value;
             int batch = (int)numBatchSize.Value;
+            int imgSize = (int)numImgSize.Value;
+            double learningRate = (double)numLearningRate.Value;
+            int patience = (int)numPatience.Value;
+            float valSplit = (float)numValSplit.Value;
+            bool useMosaic = chkMosaic.Checked;
+            bool useMixup = chkMixup.Checked;
 
             _useOBBModel = (cmbModelType.SelectedIndex == 1); // 0=Standard, 1=OBB
             AppendConsole($"模型类型: {(_useOBBModel ? "旋转检测 (OBB)" : "标准检测 (Standard)")}");
             LoggerService.Info($"模型类型: {(_useOBBModel ? "旋转检测 (OBB)" : "标准检测 (Standard)")}");
+            AppendConsole($"训练调参: lr0={learningRate:F4}, img size={imgSize}, patience={patience}, Mosaic={(useMosaic ? "ON" : "OFF")}, MixUp={(useMixup ? "ON" : "OFF")}, val split={valSplit:F2}");
 
             string baseModelPath = null;
             if (chkContinueTrain.Checked)
@@ -1029,13 +1032,15 @@ namespace AudioTraining
             {
                 await _trainingProcess.StartIncrementalTrainingAsync(
                     yamlPath, modelSize, epochs, batch, _currentTrainProject, 
-                    pythonPath, _useOBBModel, baseModelPath, freezeLayers, seed);
+                    pythonPath, _useOBBModel, baseModelPath, freezeLayers, seed,
+                    imgSize, learningRate, patience, useMosaic, useMixup);
             }
             else
             {
                 await _trainingProcess.StartTrainingAsync(
                     yamlPath, modelSize, epochs, batch, _currentTrainProject, 
-                    pythonPath, _useOBBModel, seed, baseModelPath);
+                    pythonPath, _useOBBModel, seed, baseModelPath,
+                    imgSize, learningRate, patience, useMosaic, useMixup);
             }
         }
 
