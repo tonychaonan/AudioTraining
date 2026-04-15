@@ -173,6 +173,103 @@ namespace AudioTraining
             OutputReceived?.Invoke(this, new TrainingEventArgs { Message = message });
         }
 
+        /// <summary>
+        /// 【需求3】启动增量学习训练（支持层冻结和类别扩展）
+        /// </summary>
+        public async Task StartIncrementalTrainingAsync(string dataYamlPath, string modelSize, int epochs, int batchSize, 
+            string projectPath, string pythonPath, bool useOBB, string baseModelPath, int freezeLayers, int seed = 0)
+        {
+            _errorBuffer = new StringBuilder();
+            ExitCode = 0;
+            OnnxModelPath = null;
+            ErrorLog = string.Empty;
+
+            string scriptPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Scripts", "train_incremental.py");
+            if (!File.Exists(scriptPath))
+            {
+                OnOutput($"Error: 找不到增量训练脚本: {scriptPath}");
+                OnOutput("请确保 Scripts/train_incremental.py 文件存在");
+                return;
+            }
+
+            string pythonExe = string.IsNullOrWhiteSpace(pythonPath) ? "python" : pythonPath;
+
+            // Arguments: <yaml_path> <epochs> <img_size> <model_type> <device> <model_size> <batch_size> <base_model_path> <freeze_layers> [seed]
+            int imgSize = 640;
+            string modelType = useOBB ? "obb" : "detect";
+            string device = "0";
+            string normalizedModelSize = string.IsNullOrWhiteSpace(modelSize) ? "n" : modelSize.Trim().ToLowerInvariant();
+            
+            string args = $"\"{scriptPath}\" \"{dataYamlPath}\" {epochs} {imgSize} {modelType} {device} {normalizedModelSize} {batchSize} \"{baseModelPath}\" {freezeLayers}";
+            
+            if (seed > 0)
+            {
+                args += $" {seed}";
+                OnOutput($"增量训练（可重复模式）- 随机种子: {seed}");
+                LoggerService.Info($"[IncrementalTraining] Random seed enabled: {seed}");
+            }
+            else
+            {
+                OnOutput("增量训练（非确定性模式，速度更快）");
+                LoggerService.Info($"[IncrementalTraining] Random seed disabled");
+            }
+
+            OnOutput($"增量学习模式 - 基础模型: {Path.GetFileName(baseModelPath)}");
+            OnOutput($"增量学习模式 - 冻结层数: {freezeLayers}");
+            LoggerService.Info($"[IncrementalTraining] Base model: {baseModelPath}");
+            LoggerService.Info($"[IncrementalTraining] Freeze layers: {freezeLayers}");
+
+            _process = new Process();
+            _process.StartInfo.FileName = pythonExe;
+            _process.StartInfo.Arguments = args;
+            _process.StartInfo.WorkingDirectory = Path.GetDirectoryName(scriptPath); 
+            _process.StartInfo.UseShellExecute = false;
+            _process.StartInfo.RedirectStandardOutput = true;
+            _process.StartInfo.RedirectStandardError = true;
+            _process.StartInfo.CreateNoWindow = true;
+
+            _process.OutputDataReceived += (s, e) => ParseOutput(e.Data, false);
+            _process.ErrorDataReceived += (s, e) => ParseOutput(e.Data, true);
+
+            _process.EnableRaisingEvents = true;
+            _process.Exited += (s, e) => 
+            {
+                ExitCode = _process.ExitCode;
+                ErrorLog = _errorBuffer.ToString();
+                OnOutput("增量训练进程已退出");
+                LoggerService.Info($"[IncrementalTraining] Process exited with code: {ExitCode}");
+                if (ExitCode != 0)
+                {
+                    LoggerService.Error($"[IncrementalTraining] Process failed with exit code {ExitCode}. Error log: {ErrorLog}");
+                }
+                else
+                {
+                    LoggerService.Info($"[IncrementalTraining] Training completed successfully");
+                }
+                TrainingCompleted?.Invoke(this, EventArgs.Empty);
+            };
+
+            try
+            {
+                OnOutput($"启动增量训练脚本: {pythonExe} {args}");
+                LoggerService.Info($"[IncrementalTraining] Starting Python incremental training process");
+                LoggerService.Info($"[IncrementalTraining] Python executable: {pythonExe}");
+                LoggerService.Info($"[IncrementalTraining] Arguments: {args}");
+                LoggerService.Info($"[IncrementalTraining] Working directory: {_process.StartInfo.WorkingDirectory}");
+                
+                _process.Start();
+                _process.BeginOutputReadLine();
+                _process.BeginErrorReadLine();
+                
+                LoggerService.Info($"[IncrementalTraining] Process started with PID: {_process.Id}");
+                await Task.Run(() => _process.WaitForExit());
+            }
+            catch (Exception ex)
+            {
+                OnOutput($"Error starting python process: {ex.Message}. Make sure 'python' is installed and in PATH.");
+            }
+        }
+
         public void Stop()
         {
             try

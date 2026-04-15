@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Windows.Forms.DataVisualization.Charting;
 using AudioTraining.Services;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace AudioTraining
@@ -28,6 +29,18 @@ namespace AudioTraining
         private string _loadedOnnxPath;
         private bool _useOBBModel = false;
         private readonly string[] _imageExtensions = new[] { ".jpg", ".jpeg", ".png", ".bmp" };
+        private string _autoDatasetRootFolder;
+        private FileSystemWatcher _autoDatasetWatcher;
+        private readonly object _autoDatasetSyncRoot = new object();
+        private const double AUTO_ANNOTATE_HIGH_CONFIDENCE = 0.85;
+        private const double AUTO_ANNOTATE_REVIEW_CONFIDENCE = 0.55;
+        
+        // 增量学习相关字段 (需求3)
+        private IncrementalClassMapper _incrementalClassMapper;
+        private CheckBox chkEnableIncrementalMode;
+        private NumericUpDown numFreezeLayers;
+        private Label lblIncrementalTip;
+        private bool _isIncrementalMode = false;
 
         public Form1()
         {
@@ -46,10 +59,16 @@ namespace AudioTraining
 
             _yoloInference = new YoloInference();
             _yoloOBBInference = new YoloOBBInference();
+            _incrementalClassMapper = new IncrementalClassMapper();
+            
+            // 初始化增量学习UI控件 (需求3)
+            InitializeIncrementalLearningControls();
 
             _monitorTimer = new Timer();
             _monitorTimer.Interval = 2000;
             _monitorTimer.Tick += MonitorTimer_Tick;
+
+            InitializeClosedLoopBridge();
 
             chartLoss.Series.Clear();
             chartLoss.Series.Add("BoxLoss");
@@ -61,6 +80,54 @@ namespace AudioTraining
             
             chartLoss.ChartAreas[0].AxisX.Title = "Epochs";
             chartLoss.ChartAreas[0].AxisY.Title = "Loss";
+        }
+        
+        /// <summary>
+        /// 初始化增量学习UI控件 (需求3)
+        /// </summary>
+        private void InitializeIncrementalLearningControls()
+        {
+            // 创建增量学习模式复选框
+            chkEnableIncrementalMode = new CheckBox
+            {
+                Text = "启用增量学习模式（保留旧类别+学习新类别）",
+                Location = new Point(200, 205),
+                AutoSize = true,
+                Enabled = false
+            };
+            chkEnableIncrementalMode.CheckedChanged += ChkEnableIncrementalMode_CheckedChanged;
+            grpTrainParams.Controls.Add(chkEnableIncrementalMode);
+            
+            // 创建冻结层数数值框
+            Label lblFreezeLayers = new Label
+            {
+                Text = "冻结层数:",
+                Location = new Point(200, 270),
+                AutoSize = true
+            };
+            grpTrainParams.Controls.Add(lblFreezeLayers);
+            
+            numFreezeLayers = new NumericUpDown
+            {
+                Location = new Point(280, 267),
+                Width = 80,
+                Minimum = 0,
+                Maximum = 50,
+                Value = 10,
+                Enabled = false
+            };
+            grpTrainParams.Controls.Add(numFreezeLayers);
+            
+            // 创建提示文本
+            lblIncrementalTip = new Label
+            {
+                Text = "增量学习：冻结模型前N层，仅训练检测头和新类别",
+                Location = new Point(370, 270),
+                AutoSize = true,
+                ForeColor = Color.Gray,
+                Visible = false
+            };
+            grpTrainParams.Controls.Add(lblIncrementalTip);
         }
 
         private void btnLoadFolder_Click(object sender, EventArgs e)
@@ -79,14 +146,16 @@ namespace AudioTraining
             try
             {
                 _currentImageFolder = folderPath;
-                _imageFiles = Directory.GetFiles(folderPath, "*.*")
+                _imageFiles = Directory.GetFiles(folderPath, "*.*", SearchOption.AllDirectories)
                                      .Where(s => _imageExtensions.Contains(Path.GetExtension(s).ToLower()))
+                                     .Where(s => !s.Contains(Path.DirectorySeparatorChar + "_IncrementalWorkspace" + Path.DirectorySeparatorChar))
+                                     .Where(s => !s.Contains(Path.DirectorySeparatorChar + "Dataset_Prepared" + Path.DirectorySeparatorChar))
                                      .ToList();
 
                 lstImages.Items.Clear();
                 foreach (var file in _imageFiles)
                 {
-                    lstImages.Items.Add(Path.GetFileName(file));
+                    lstImages.Items.Add(GetRelativeDisplayPath(folderPath, file));
                 }
 
                 if (lstImages.Items.Count > 0)
@@ -106,14 +175,20 @@ namespace AudioTraining
 
             try
             {
-                string fileName = lstImages.SelectedItem.ToString();
-                string fullPath = Path.Combine(_currentImageFolder, fileName);
+                string fullPath = _imageFiles[lstImages.SelectedIndex];
                 
                 if (picPreview.Image != null) picPreview.Image.Dispose();
                 
                 using (var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read))
                 {
                     picPreview.Image = Image.FromStream(stream);
+                }
+
+                var annotationResult = TryAutoAnnotateSingleImage(fullPath, overwriteExisting: false);
+                if (annotationResult != null)
+                {
+                    AppendConsole($"预览自动标注: {Path.GetFileName(fullPath)} | 框数:{annotationResult.PredictionCount} | 最高置信度:{annotationResult.TopConfidence:F3} | 待复核:{(annotationResult.NeedsReview ? "是" : "否")}");
+                    UpdateAutoAnnotateStatus();
                 }
             }
             catch { }
@@ -290,8 +365,10 @@ namespace AudioTraining
 
         private List<string> BatchAutoAnnotateCurrentFolder()
         {
-            var imageFiles = Directory.GetFiles(_currentImageFolder, "*.*")
+            var imageFiles = Directory.GetFiles(_currentImageFolder, "*.*", SearchOption.AllDirectories)
                 .Where(s => _imageExtensions.Contains(Path.GetExtension(s).ToLower()))
+                .Where(s => !s.Contains(Path.DirectorySeparatorChar + "_IncrementalWorkspace" + Path.DirectorySeparatorChar))
+                .Where(s => !s.Contains(Path.DirectorySeparatorChar + "Dataset_Prepared" + Path.DirectorySeparatorChar))
                 .OrderBy(s => s)
                 .ToList();
 
@@ -301,30 +378,259 @@ namespace AudioTraining
             }
 
             var classNameById = new Dictionary<int, string>();
+            var reviewItems = new List<AutoReviewItem>();
 
             foreach (var imagePath in imageFiles)
             {
-                using (var bitmap = new Bitmap(imagePath))
+                var result = TryAutoAnnotateSingleImage(imagePath, overwriteExisting: true);
+                if (result == null)
                 {
-                    var predictions = RunAutoAnnotationInference(bitmap);
-                    string txtPath = Path.ChangeExtension(imagePath, ".txt");
-                    WritePredictionLabels(txtPath, bitmap.Width, bitmap.Height, predictions);
+                    continue;
+                }
 
-                    foreach (var prediction in predictions)
+                foreach (var item in result.Predictions)
+                {
+                    if (!classNameById.ContainsKey(item.ClassId))
                     {
-                        if (!classNameById.ContainsKey(prediction.ClassId))
-                        {
-                            classNameById[prediction.ClassId] = string.IsNullOrWhiteSpace(prediction.Label)
-                                ? prediction.ClassId.ToString()
-                                : prediction.Label;
-                        }
+                        classNameById[item.ClassId] = string.IsNullOrWhiteSpace(item.Label)
+                            ? item.ClassId.ToString()
+                            : item.Label;
                     }
+                }
+
+                if (result.NeedsReview)
+                {
+                    reviewItems.Add(new AutoReviewItem
+                    {
+                        ImagePath = imagePath,
+                        TopConfidence = result.TopConfidence,
+                        PredictionCount = result.PredictionCount,
+                        Note = result.ReviewReason
+                    });
                 }
             }
 
             var classes = BuildClassList(classNameById);
             File.WriteAllLines(Path.Combine(_currentImageFolder, "classes.txt"), classes, Encoding.UTF8);
+            SaveReviewManifest(_currentImageFolder, reviewItems);
             return classes;
+        }
+
+        private AutoAnnotationResult TryAutoAnnotateSingleImage(string imagePath, bool overwriteExisting)
+        {
+            if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+            {
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(_loadedOnnxPath) || !File.Exists(_loadedOnnxPath))
+            {
+                return null;
+            }
+
+            try
+            {
+                using (var bitmap = new Bitmap(imagePath))
+                {
+                    var predictions = RunAutoAnnotationInference(bitmap);
+                    string txtPath = Path.ChangeExtension(imagePath, ".txt");
+                    if (overwriteExisting || !File.Exists(txtPath))
+                    {
+                        WritePredictionLabels(txtPath, bitmap.Width, bitmap.Height, predictions);
+                    }
+
+                    var topConfidence = predictions.Count > 0 ? predictions.Max(p => (double)p.Confidence) : 0;
+                    bool needsReview = predictions.Count == 0 || topConfidence < AUTO_ANNOTATE_REVIEW_CONFIDENCE;
+                    string reviewReason = predictions.Count == 0
+                        ? "未识别到目标"
+                        : (topConfidence < AUTO_ANNOTATE_REVIEW_CONFIDENCE
+                            ? $"置信度过低:{topConfidence:F3}"
+                            : (topConfidence < AUTO_ANNOTATE_HIGH_CONFIDENCE ? $"建议复核:{topConfidence:F3}" : ""));
+
+                    SaveSingleReviewSidecar(imagePath, predictions, needsReview, reviewReason);
+
+                    return new AutoAnnotationResult
+                    {
+                        ImagePath = imagePath,
+                        Predictions = predictions,
+                        TopConfidence = topConfidence,
+                        PredictionCount = predictions.Count,
+                        NeedsReview = needsReview,
+                        ReviewReason = reviewReason
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendConsole($"自动标注失败: {Path.GetFileName(imagePath)} | {ex.Message}");
+                return null;
+            }
+        }
+
+        private void SaveSingleReviewSidecar(string imagePath, List<YoloOBBPrediction> predictions, bool needsReview, string reviewReason)
+        {
+            try
+            {
+                var review = new AutoReviewItem
+                {
+                    ImagePath = imagePath,
+                    TopConfidence = predictions.Count > 0 ? predictions.Max(p => (double)p.Confidence) : 0,
+                    PredictionCount = predictions.Count,
+                    NeedsReview = needsReview,
+                    Note = reviewReason
+                };
+
+                File.WriteAllText(Path.ChangeExtension(imagePath, ".review.json"), JsonConvert.SerializeObject(review, Formatting.Indented), Encoding.UTF8);
+            }
+            catch (Exception ex)
+            {
+                AppendConsole($"写入复核侧车失败: {Path.GetFileName(imagePath)} | {ex.Message}");
+            }
+        }
+
+        private void SaveReviewManifest(string folderPath, List<AutoReviewItem> reviewItems)
+        {
+            try
+            {
+                string manifestPath = Path.Combine(folderPath, "review_manifest.json");
+                File.WriteAllText(manifestPath, JsonConvert.SerializeObject(reviewItems, Formatting.Indented), Encoding.UTF8);
+            }
+            catch (Exception ex)
+            {
+                AppendConsole($"写入复核清单失败: {ex.Message}");
+            }
+        }
+
+        private void InitializeClosedLoopBridge()
+        {
+            _autoDatasetRootFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "AutoDataset");
+            try
+            {
+                Directory.CreateDirectory(_autoDatasetRootFolder);
+            }
+            catch { }
+
+            try
+            {
+                _autoDatasetWatcher?.Dispose();
+                _autoDatasetWatcher = new FileSystemWatcher(_autoDatasetRootFolder)
+                {
+                    IncludeSubdirectories = true,
+                    NotifyFilter = NotifyFilters.DirectoryName | NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime | NotifyFilters.Size,
+                    Filter = "*.*",
+                    EnableRaisingEvents = true
+                };
+
+                _autoDatasetWatcher.Created += AutoDatasetWatcher_Changed;
+                _autoDatasetWatcher.Changed += AutoDatasetWatcher_Changed;
+                _autoDatasetWatcher.Deleted += AutoDatasetWatcher_Changed;
+                _autoDatasetWatcher.Renamed += AutoDatasetWatcher_Renamed;
+            }
+            catch (Exception ex)
+            {
+                AppendConsole($"自动采图目录监视器初始化失败: {ex.Message}");
+            }
+        }
+
+        private void AutoDatasetWatcher_Changed(object sender, FileSystemEventArgs e)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(UpdateAutoAnnotateStatus));
+                return;
+            }
+
+            UpdateAutoAnnotateStatus();
+        }
+
+        private void AutoDatasetWatcher_Renamed(object sender, RenamedEventArgs e)
+        {
+            AutoDatasetWatcher_Changed(sender, e);
+        }
+
+        private string BuildIncrementalTrainingWorkspace(string sourceFolder, out string classesFile)
+        {
+            if (string.IsNullOrWhiteSpace(sourceFolder) || !Directory.Exists(sourceFolder))
+            {
+                throw new DirectoryNotFoundException("训练源目录不存在。");
+            }
+
+            string workspaceRoot = Path.Combine(sourceFolder, "_IncrementalWorkspace");
+            if (Directory.Exists(workspaceRoot))
+            {
+                try { Directory.Delete(workspaceRoot, true); } catch { }
+            }
+
+            Directory.CreateDirectory(workspaceRoot);
+            var classNames = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var classFile in Directory.GetFiles(sourceFolder, "classes.txt", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    foreach (var line in File.ReadAllLines(classFile))
+                    {
+                        string value = line?.Trim();
+                        if (!string.IsNullOrWhiteSpace(value))
+                        {
+                            classNames.Add(value);
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            var imageFiles = Directory.GetFiles(sourceFolder, "*.*", SearchOption.AllDirectories)
+                .Where(s => _imageExtensions.Contains(Path.GetExtension(s).ToLower()))
+                .Where(s => !s.Contains(Path.DirectorySeparatorChar + "_IncrementalWorkspace" + Path.DirectorySeparatorChar))
+                .Where(s => !s.Contains(Path.DirectorySeparatorChar + "Dataset_Prepared" + Path.DirectorySeparatorChar))
+                .ToList();
+
+            foreach (var imagePath in imageFiles)
+            {
+                string labelPath = Path.ChangeExtension(imagePath, ".txt");
+                if (!File.Exists(labelPath))
+                {
+                    continue;
+                }
+
+                string relative = imagePath.Substring(sourceFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Length)
+                    .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string flatName = relative.Replace(Path.DirectorySeparatorChar, '_').Replace(Path.AltDirectorySeparatorChar, '_');
+
+                string destImgPath = Path.Combine(workspaceRoot, flatName);
+                string destLblPath = Path.ChangeExtension(destImgPath, ".txt");
+                File.Copy(imagePath, destImgPath, true);
+                File.Copy(labelPath, destLblPath, true);
+            }
+
+            classesFile = Path.Combine(workspaceRoot, "classes.txt");
+            if (classNames.Count == 0)
+            {
+                classNames.Add("defect");
+            }
+
+            File.WriteAllLines(classesFile, classNames, Encoding.UTF8);
+            return workspaceRoot;
+        }
+
+        private sealed class AutoAnnotationResult
+        {
+            public string ImagePath { get; set; }
+            public List<YoloOBBPrediction> Predictions { get; set; }
+            public double TopConfidence { get; set; }
+            public int PredictionCount { get; set; }
+            public bool NeedsReview { get; set; }
+            public string ReviewReason { get; set; }
+        }
+
+        private sealed class AutoReviewItem
+        {
+            public string ImagePath { get; set; }
+            public double TopConfidence { get; set; }
+            public int PredictionCount { get; set; }
+            public bool NeedsReview { get; set; }
+            public string Note { get; set; }
         }
 
         private List<YoloOBBPrediction> RunAutoAnnotationInference(Bitmap bitmap)
@@ -433,12 +739,30 @@ namespace AudioTraining
                 return;
             }
 
-            int imageCount = Directory.GetFiles(_currentImageFolder, "*.*")
-                .Count(s => _imageExtensions.Contains(Path.GetExtension(s).ToLower()));
-            int labelCount = Directory.GetFiles(_currentImageFolder, "*.txt")
+            int imageCount = Directory.GetFiles(_currentImageFolder, "*.*", SearchOption.AllDirectories)
+                .Count(s => _imageExtensions.Contains(Path.GetExtension(s).ToLower()) && !s.Contains(Path.DirectorySeparatorChar + "_IncrementalWorkspace" + Path.DirectorySeparatorChar));
+            int labelCount = Directory.GetFiles(_currentImageFolder, "*.txt", SearchOption.AllDirectories)
                 .Count(s => !string.Equals(Path.GetFileName(s), "classes.txt", StringComparison.OrdinalIgnoreCase));
+            int reviewCount = Directory.GetFiles(_currentImageFolder, "*.review.json", SearchOption.AllDirectories).Length;
 
-            lblAutoAnnotateStatus.Text = $"自动标注：图片 {imageCount} / 标签 {labelCount}";
+            lblAutoAnnotateStatus.Text = $"自动标注：图片 {imageCount} / 标签 {labelCount} / 待复核 {reviewCount}";
+        }
+
+        private string GetRelativeDisplayPath(string rootFolder, string fullPath)
+        {
+            if (string.IsNullOrWhiteSpace(rootFolder) || string.IsNullOrWhiteSpace(fullPath))
+            {
+                return fullPath;
+            }
+
+            string normalizedRoot = rootFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            if (fullPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return fullPath.Substring(normalizedRoot.Length);
+            }
+
+            return Path.GetFileName(fullPath);
         }
 
         private double Clamp01(double value)
@@ -483,6 +807,42 @@ namespace AudioTraining
         {
             txtBaseModelPath.Enabled = chkContinueTrain.Checked;
             btnBrowseBaseModel.Enabled = chkContinueTrain.Checked;
+            
+            // 【需求3】仅当继续训练时才能启用增量学习
+            chkEnableIncrementalMode.Enabled = chkContinueTrain.Checked;
+            if (!chkContinueTrain.Checked)
+            {
+                chkEnableIncrementalMode.Checked = false;
+            }
+        }
+        
+        /// <summary>
+        /// 【需求3】增量学习模式复选框事件
+        /// </summary>
+        private void ChkEnableIncrementalMode_CheckedChanged(object sender, EventArgs e)
+        {
+            _isIncrementalMode = chkEnableIncrementalMode.Checked;
+            numFreezeLayers.Enabled = _isIncrementalMode;
+            lblIncrementalTip.Visible = _isIncrementalMode;
+            
+            if (_isIncrementalMode)
+            {
+                MessageBox.Show(
+                    "增量学习模式说明：\n\n" +
+                    "1. 新数据集的类别列表必须以旧类别开头（顺序一致）\n" +
+                    "2. 可以在末尾添加新类别，例如：\n" +
+                    "   旧模型: [A, B, C]\n" +
+                    "   新数据: [A, B, C, D, E] ✓ 正确\n" +
+                    "   新数据: [B, C, D] ✗ 错误（顺序不匹配）\n\n" +
+                    "3. 冻结层数建议：\n" +
+                    "   - 0层 = 全模型训练（类似普通训练）\n" +
+                    "   - 10层 = 冻结前10层（推荐，平衡速度和效果）\n" +
+                    "   - -1层 = 冻结整个backbone（仅训练检测头）",
+                    "增量学习模式",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+            }
         }
 
         private void btnBrowseBaseModel_Click(object sender, EventArgs e)
@@ -513,17 +873,19 @@ namespace AudioTraining
 
             try
             {
-                string classesFile = Path.Combine(_currentImageFolder, "classes.txt");
+                // 1. Validate X-AnyLabeling annotations
+                string workspaceRoot = BuildIncrementalTrainingWorkspace(_currentImageFolder, out string classesFile);
                 
+                // Check if classes.txt exists (required by X-AnyLabeling)
                 if (!File.Exists(classesFile))
                 {
                     MessageBox.Show($"未找到 classes.txt 文件！\n\n请确保使用 X-AnyLabeling 标注工具，并已导出标注数据。\n路径: {classesFile}");
                     return;
                 }
 
-                var imageFiles = Directory.GetFiles(_currentImageFolder, "*.jpg")
-                    .Concat(Directory.GetFiles(_currentImageFolder, "*.png"))
-                    .Concat(Directory.GetFiles(_currentImageFolder, "*.bmp"))
+                var imageFiles = Directory.GetFiles(workspaceRoot, "*.jpg")
+                    .Concat(Directory.GetFiles(workspaceRoot, "*.png"))
+                    .Concat(Directory.GetFiles(workspaceRoot, "*.bmp"))
                     .ToList();
 
                 if (imageFiles.Count == 0)
@@ -543,6 +905,7 @@ namespace AudioTraining
                 }
 
                 AppendConsole($"检测到 classes.txt: {classesFile}");
+                AppendConsole($"训练工作区: {workspaceRoot}");
                 AppendConsole($"图片数量: {imageFiles.Count}, 标注文件(TXT): {txtCount}");
 
                 if (txtCount == 0)
@@ -579,7 +942,9 @@ namespace AudioTraining
             try
             {
                 AppendConsole("正在整理数据集目录结构 (Train/Val Split)...");
-                datasetRoot = await Task.Run(() => DatasetManager.PrepareDataset(_currentImageFolder, Path.Combine(_currentImageFolder, "classes.txt")));
+                // Use DatasetManager to create Dataset_Prepared folder
+                string workspaceRoot = BuildIncrementalTrainingWorkspace(_currentImageFolder, out string classesFile);
+                datasetRoot = await Task.Run(() => DatasetManager.PrepareDataset(workspaceRoot, classesFile));
                 yamlPath = Path.Combine(datasetRoot, "data.yaml");
                 AppendConsole($"数据集整理完成: {datasetRoot}");
                 AppendConsole($"配置文件生成: {yamlPath}");
@@ -620,6 +985,27 @@ namespace AudioTraining
                     MessageBox.Show($"基础模型不存在：\n{baseModelPath}");
                     return;
                 }
+                
+                // 【需求3】如果启用增量学习模式，验证类别兼容性
+                if (_isIncrementalMode)
+                {
+                    try
+                    {
+                        string workspaceRoot = BuildIncrementalTrainingWorkspace(_currentImageFolder, out string classesFile);
+                        string[] newClasses = _incrementalClassMapper.ReadClassesFromFile(classesFile);
+                        
+                        // 注意：无法直接从.pt读取类别，这里简化处理，由Python脚本验证
+                        // 实际验证会在train_incremental.py中进行
+                        AppendConsole($"增量学习模式已启用，冻结层数: {(int)numFreezeLayers.Value}");
+                        AppendConsole($"新数据集类别数: {newClasses.Length}");
+                        AppendConsole("类别兼容性将由Python训练脚本验证...");
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"读取类别信息失败: {ex.Message}");
+                        return;
+                    }
+                }
             }
 
             // Setup output directory
@@ -636,8 +1022,21 @@ namespace AudioTraining
             _currentTrainProject = Path.Combine(scriptsDir, "train_output");
 
             int seed = chkEnableSeed.Checked ? (int)numSeed.Value : 0;
+            int freezeLayers = _isIncrementalMode ? (int)numFreezeLayers.Value : 0;
             
-            await _trainingProcess.StartTrainingAsync(yamlPath, modelSize, epochs, batch, _currentTrainProject, pythonPath, _useOBBModel, seed, baseModelPath);
+            // 【需求3】根据是否启用增量学习，调用不同的训练方法
+            if (_isIncrementalMode && chkContinueTrain.Checked)
+            {
+                await _trainingProcess.StartIncrementalTrainingAsync(
+                    yamlPath, modelSize, epochs, batch, _currentTrainProject, 
+                    pythonPath, _useOBBModel, baseModelPath, freezeLayers, seed);
+            }
+            else
+            {
+                await _trainingProcess.StartTrainingAsync(
+                    yamlPath, modelSize, epochs, batch, _currentTrainProject, 
+                    pythonPath, _useOBBModel, seed, baseModelPath);
+            }
         }
 
         private void btnStopTrain_Click(object sender, EventArgs e)

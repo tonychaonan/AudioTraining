@@ -28,17 +28,17 @@
         /// </summary>
         private void InitializeComponent()
         {
-            System.Windows.Forms.DataVisualization.Charting.ChartArea chartArea1 = new System.Windows.Forms.DataVisualization.Charting.ChartArea();
-            System.Windows.Forms.DataVisualization.Charting.Legend legend1 = new System.Windows.Forms.DataVisualization.Charting.Legend();
-            System.Windows.Forms.DataVisualization.Charting.Series series1 = new System.Windows.Forms.DataVisualization.Charting.Series();
+            System.Windows.Forms.DataVisualization.Charting.ChartArea chartArea2 = new System.Windows.Forms.DataVisualization.Charting.ChartArea();
+            System.Windows.Forms.DataVisualization.Charting.Legend legend2 = new System.Windows.Forms.DataVisualization.Charting.Legend();
+            System.Windows.Forms.DataVisualization.Charting.Series series2 = new System.Windows.Forms.DataVisualization.Charting.Series();
             this.tabControl1 = new System.Windows.Forms.TabControl();
             this.tabData = new System.Windows.Forms.TabPage();
             this.splitContainerData = new System.Windows.Forms.SplitContainer();
             this.lstImages = new System.Windows.Forms.ListBox();
             this.picPreview = new System.Windows.Forms.PictureBox();
             this.panelDataTop = new System.Windows.Forms.Panel();
-            this.btnGenerateXAnyLabelingYaml = new System.Windows.Forms.Button();
             this.lblAutoAnnotateStatus = new System.Windows.Forms.Label();
+            this.btnGenerateXAnyLabelingYaml = new System.Windows.Forms.Button();
             this.btnReviewCurrentFolder = new System.Windows.Forms.Button();
             this.btnBatchAutoAnnotate = new System.Windows.Forms.Button();
             this.btnLabelImg = new System.Windows.Forms.Button();
@@ -82,9 +82,9 @@
             this.btnLoadModel = new System.Windows.Forms.Button();
             this.tabControl1.SuspendLayout();
             this.tabData.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.splitContainerData)).BeginInit();
             this.splitContainerData.Panel1.SuspendLayout();
             this.splitContainerData.Panel2.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.splitContainerData)).BeginInit();
             this.splitContainerData.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.picPreview)).BeginInit();
             this.panelDataTop.SuspendLayout();
@@ -145,7 +145,7 @@
             // splitContainerData.Panel2
             // 
             this.splitContainerData.Panel2.Controls.Add(this.picPreview);
-            this.splitContainerData.Size = new System.Drawing.Size(970, 566);
+            this.splitContainerData.Size = new System.Drawing.Size(970, 531);
             this.splitContainerData.SplitterDistance = 250;
             this.splitContainerData.TabIndex = 1;
             // 
@@ -156,7 +156,7 @@
             this.lstImages.ItemHeight = 15;
             this.lstImages.Location = new System.Drawing.Point(0, 0);
             this.lstImages.Name = "lstImages";
-            this.lstImages.Size = new System.Drawing.Size(250, 566);
+            this.lstImages.Size = new System.Drawing.Size(250, 531);
             this.lstImages.TabIndex = 0;
             this.lstImages.SelectedIndexChanged += new System.EventHandler(this.lstImages_SelectedIndexChanged);
             // 
@@ -166,7 +166,7 @@
             this.picPreview.Dock = System.Windows.Forms.DockStyle.Fill;
             this.picPreview.Location = new System.Drawing.Point(0, 0);
             this.picPreview.Name = "picPreview";
-            this.picPreview.Size = new System.Drawing.Size(716, 566);
+            this.picPreview.Size = new System.Drawing.Size(716, 531);
             this.picPreview.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.picPreview.TabIndex = 0;
             this.picPreview.TabStop = false;
@@ -193,6 +193,16 @@
             this.lblAutoAnnotateStatus.Size = new System.Drawing.Size(127, 15);
             this.lblAutoAnnotateStatus.TabIndex = 4;
             this.lblAutoAnnotateStatus.Text = "自动标注：未执行";
+            // 
+            // btnGenerateXAnyLabelingYaml
+            // 
+            this.btnGenerateXAnyLabelingYaml.Location = new System.Drawing.Point(15, 48);
+            this.btnGenerateXAnyLabelingYaml.Name = "btnGenerateXAnyLabelingYaml";
+            this.btnGenerateXAnyLabelingYaml.Size = new System.Drawing.Size(178, 30);
+            this.btnGenerateXAnyLabelingYaml.TabIndex = 5;
+            this.btnGenerateXAnyLabelingYaml.Text = "生成标注工具配置";
+            this.btnGenerateXAnyLabelingYaml.UseVisualStyleBackColor = true;
+            this.btnGenerateXAnyLabelingYaml.Click += new System.EventHandler(this.btnGenerateXAnyLabelingYaml_Click);
             // 
             // btnReviewCurrentFolder
             // 
@@ -223,16 +233,6 @@
             this.btnLabelImg.Text = "启动 X-AnyLabeling";
             this.btnLabelImg.UseVisualStyleBackColor = true;
             this.btnLabelImg.Click += new System.EventHandler(this.btnLabelImg_Click);
-            // 
-            // btnGenerateXAnyLabelingYaml
-            // 
-            this.btnGenerateXAnyLabelingYaml.Location = new System.Drawing.Point(15, 48);
-            this.btnGenerateXAnyLabelingYaml.Name = "btnGenerateXAnyLabelingYaml";
-            this.btnGenerateXAnyLabelingYaml.Size = new System.Drawing.Size(178, 30);
-            this.btnGenerateXAnyLabelingYaml.TabIndex = 5;
-            this.btnGenerateXAnyLabelingYaml.Text = "生成标注工具配置";
-            this.btnGenerateXAnyLabelingYaml.UseVisualStyleBackColor = true;
-            this.btnGenerateXAnyLabelingYaml.Click += new System.EventHandler(this.btnGenerateXAnyLabelingYaml_Click);
             // 
             // btnLoadFolder
             // 
@@ -275,7 +275,7 @@
             this.grpTrainParams.Controls.Add(this.label1);
             this.grpTrainParams.Location = new System.Drawing.Point(20, 160);
             this.grpTrainParams.Name = "grpTrainParams";
-            this.grpTrainParams.Size = new System.Drawing.Size(600, 280);
+            this.grpTrainParams.Size = new System.Drawing.Size(628, 302);
             this.grpTrainParams.TabIndex = 1;
             this.grpTrainParams.TabStop = false;
             this.grpTrainParams.Text = "训练参数";
@@ -283,7 +283,7 @@
             // btnBrowseBaseModel
             // 
             this.btnBrowseBaseModel.Enabled = false;
-            this.btnBrowseBaseModel.Location = new System.Drawing.Point(519, 236);
+            this.btnBrowseBaseModel.Location = new System.Drawing.Point(519, 215);
             this.btnBrowseBaseModel.Name = "btnBrowseBaseModel";
             this.btnBrowseBaseModel.Size = new System.Drawing.Size(75, 23);
             this.btnBrowseBaseModel.TabIndex = 14;
@@ -294,7 +294,7 @@
             // txtBaseModelPath
             // 
             this.txtBaseModelPath.Enabled = false;
-            this.txtBaseModelPath.Location = new System.Drawing.Point(119, 236);
+            this.txtBaseModelPath.Location = new System.Drawing.Point(110, 213);
             this.txtBaseModelPath.Name = "txtBaseModelPath";
             this.txtBaseModelPath.Size = new System.Drawing.Size(394, 25);
             this.txtBaseModelPath.TabIndex = 13;
@@ -302,9 +302,9 @@
             // chkContinueTrain
             // 
             this.chkContinueTrain.AutoSize = true;
-            this.chkContinueTrain.Location = new System.Drawing.Point(9, 205);
+            this.chkContinueTrain.Location = new System.Drawing.Point(6, 188);
             this.chkContinueTrain.Name = "chkContinueTrain";
-            this.chkContinueTrain.Size = new System.Drawing.Size(179, 19);
+            this.chkContinueTrain.Size = new System.Drawing.Size(164, 19);
             this.chkContinueTrain.TabIndex = 12;
             this.chkContinueTrain.Text = "从已有模型继续训练";
             this.chkContinueTrain.UseVisualStyleBackColor = true;
@@ -544,18 +544,18 @@
             // 
             // chartLoss
             // 
-            chartArea1.Name = "ChartArea1";
-            this.chartLoss.ChartAreas.Add(chartArea1);
+            chartArea2.Name = "ChartArea1";
+            this.chartLoss.ChartAreas.Add(chartArea2);
             this.chartLoss.Dock = System.Windows.Forms.DockStyle.Fill;
-            legend1.Name = "Legend1";
-            this.chartLoss.Legends.Add(legend1);
+            legend2.Name = "Legend1";
+            this.chartLoss.Legends.Add(legend2);
             this.chartLoss.Location = new System.Drawing.Point(3, 3);
             this.chartLoss.Name = "chartLoss";
-            series1.ChartArea = "ChartArea1";
-            series1.ChartType = System.Windows.Forms.DataVisualization.Charting.SeriesChartType.Line;
-            series1.Legend = "Legend1";
-            series1.Name = "Loss";
-            this.chartLoss.Series.Add(series1);
+            series2.ChartArea = "ChartArea1";
+            series2.ChartType = System.Windows.Forms.DataVisualization.Charting.SeriesChartType.Line;
+            series2.Legend = "Legend1";
+            series2.Name = "Loss";
+            this.chartLoss.Series.Add(series2);
             this.chartLoss.Size = new System.Drawing.Size(970, 280);
             this.chartLoss.TabIndex = 0;
             this.chartLoss.Text = "chart1";
