@@ -71,6 +71,7 @@
             this.numPatience = new System.Windows.Forms.NumericUpDown();
             this.chkMosaic = new System.Windows.Forms.CheckBox();
             this.chkMixup = new System.Windows.Forms.CheckBox();
+            this.chkFastDatasetMode = new System.Windows.Forms.CheckBox();
             this.labelValSplit = new System.Windows.Forms.Label();
             this.numValSplit = new System.Windows.Forms.NumericUpDown();
             this.grpModel = new System.Windows.Forms.GroupBox();
@@ -302,6 +303,7 @@
             this.grpTrainParams.Controls.Add(this.numPatience);
             this.grpTrainParams.Controls.Add(this.chkMosaic);
             this.grpTrainParams.Controls.Add(this.chkMixup);
+            this.grpTrainParams.Controls.Add(this.chkFastDatasetMode);
             this.grpTrainParams.Controls.Add(this.labelValSplit);
             this.grpTrainParams.Controls.Add(this.numValSplit);
             this.grpTrainParams.Location = new System.Drawing.Point(20, 160);
@@ -647,6 +649,18 @@
             this.chkMixup.TabIndex = 26;
             this.chkMixup.Text = "MixUp";
             this.chkMixup.UseVisualStyleBackColor = true;
+            // 
+            // chkFastDatasetMode
+            // 
+            this.chkFastDatasetMode.AutoSize = true;
+            this.chkFastDatasetMode.Checked = true;
+            this.chkFastDatasetMode.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.chkFastDatasetMode.Location = new System.Drawing.Point(287, 81);
+            this.chkFastDatasetMode.Name = "chkFastDatasetMode";
+            this.chkFastDatasetMode.Size = new System.Drawing.Size(273, 19);
+            this.chkFastDatasetMode.TabIndex = 27;
+            this.chkFastDatasetMode.Text = "快速模式（单层目录跳过 flatten）";
+            this.chkFastDatasetMode.UseVisualStyleBackColor = true;
             // 
             // labelValSplit
             // 
@@ -1009,6 +1023,7 @@
         private System.Windows.Forms.NumericUpDown numPatience;
         private System.Windows.Forms.CheckBox chkMosaic;
         private System.Windows.Forms.CheckBox chkMixup;
+        private System.Windows.Forms.CheckBox chkFastDatasetMode;
         private System.Windows.Forms.Label labelValSplit;
         private System.Windows.Forms.NumericUpDown numValSplit;
         private System.Windows.Forms.GroupBox grpModel;

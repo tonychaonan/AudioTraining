@@ -543,11 +543,76 @@ namespace AudioTraining
             AutoDatasetWatcher_Changed(sender, e);
         }
 
-        private string BuildIncrementalTrainingWorkspace(string sourceFolder, out string classesFile)
+        /// <summary>
+        /// 缓存上次构建的 workspace，避免一次"开始训练"里连续调用 3 次造成重复 IO。
+        /// 用源目录 + 目录最后修改时间做 key；key 不变就直接返回缓存。
+        /// </summary>
+        private string _lastWorkspaceSourceKey;
+        private string _lastWorkspaceRoot;
+        private string _lastWorkspaceClassesFile;
+
+        /// <summary>
+        /// workspace 构建结果（替代原来的 out 参数，这样可以直接塞进 Task.Run）
+        /// </summary>
+        private sealed class WorkspaceBuildResult
+        {
+            public string WorkspaceRoot;
+            public string ClassesFile;
+        }
+
+        /// <summary>
+        /// ★ 快速路径：用户数据已经是"单层目录"时走这里，完全跳过 flatten/Copy。
+        /// 直接返回 sourceFolder 当 workspaceRoot，classes.txt 也读用户目录下的那份。
+        /// 对 500 张图来说从 "几十秒 File.Copy" 降到 "几毫秒"。
+        /// </summary>
+        private WorkspaceBuildResult BuildFastDatasetWorkspace(string sourceFolder)
         {
             if (string.IsNullOrWhiteSpace(sourceFolder) || !Directory.Exists(sourceFolder))
             {
                 throw new DirectoryNotFoundException("训练源目录不存在。");
+            }
+
+            string classesFile = Path.Combine(sourceFolder, "classes.txt");
+            if (!File.Exists(classesFile))
+            {
+                // 快速模式强依赖用户目录下已存在 classes.txt；不存在给一个清晰的错误让用户去建
+                throw new FileNotFoundException(
+                    "快速模式要求数据根目录下必须有 classes.txt（每行一个类别名）。\n" +
+                    $"请在此处创建：{classesFile}\n" +
+                    "或取消勾选\"快速模式\"改走 flatten 模式。", classesFile);
+            }
+
+            return new WorkspaceBuildResult
+            {
+                WorkspaceRoot = sourceFolder,
+                ClassesFile = classesFile
+            };
+        }
+
+        /// <summary>
+        /// ★ 跑在后台线程的版本。点击 "开始训练" 时调用方必须用
+        /// await Task.Run(() => BuildIncrementalTrainingWorkspace(_currentImageFolder))
+        /// 包装，否则 500 张图的 File.Copy + SHA1 会把 UI 线程卡死几秒到几十秒。
+        /// </summary>
+        private WorkspaceBuildResult BuildIncrementalTrainingWorkspace(string sourceFolder)
+        {
+            if (string.IsNullOrWhiteSpace(sourceFolder) || !Directory.Exists(sourceFolder))
+            {
+                throw new DirectoryNotFoundException("训练源目录不存在。");
+            }
+
+            // 缓存命中：同一个源目录 + 最近修改时间未变，直接返回，避免一次训练里 3 次 rebuild
+            string cacheKey = sourceFolder.TrimEnd('\\', '/') + "|" + Directory.GetLastWriteTimeUtc(sourceFolder).Ticks;
+            if (cacheKey == _lastWorkspaceSourceKey
+                && !string.IsNullOrEmpty(_lastWorkspaceRoot)
+                && Directory.Exists(_lastWorkspaceRoot)
+                && File.Exists(_lastWorkspaceClassesFile))
+            {
+                return new WorkspaceBuildResult
+                {
+                    WorkspaceRoot = _lastWorkspaceRoot,
+                    ClassesFile = _lastWorkspaceClassesFile
+                };
             }
 
             string workspaceRoot = Path.Combine(sourceFolder, "_IncrementalWorkspace");
@@ -557,16 +622,49 @@ namespace AudioTraining
             }
 
             Directory.CreateDirectory(workspaceRoot);
-            var classNames = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // 类别顺序修复（原来的 SortedSet 会按字母排序，会和 base model 的类别 ID 错位）：
+            // 1) 根目录 classes.txt 优先，保持它的原顺序
+            // 2) 子目录 classes.txt 只用来追加"根目录里没有"的新类别（按发现顺序）
+            // 3) 用 List + HashSet 保证去重且顺序稳定
+            var classNames = new List<string>();
+            var classNameSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            string rootClassesFile = Path.Combine(sourceFolder, "classes.txt");
+            if (File.Exists(rootClassesFile))
+            {
+                try
+                {
+                    foreach (var line in File.ReadAllLines(rootClassesFile))
+                    {
+                        string value = line?.Trim();
+                        if (!string.IsNullOrWhiteSpace(value) && classNameSet.Add(value))
+                        {
+                            classNames.Add(value);
+                        }
+                    }
+                }
+                catch { }
+            }
 
             foreach (var classFile in Directory.GetFiles(sourceFolder, "classes.txt", SearchOption.AllDirectories))
             {
+                // 根目录那份已经读过了
+                if (string.Equals(Path.GetFullPath(classFile), Path.GetFullPath(rootClassesFile), StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                // 跳过历史残留：工作区和 Prepared 目录里的 classes.txt 不参与合并
+                if (classFile.IndexOf(Path.DirectorySeparatorChar + "_IncrementalWorkspace" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) >= 0)
+                    continue;
+                if (classFile.IndexOf(Path.DirectorySeparatorChar + "Dataset_Prepared" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) >= 0)
+                    continue;
+
                 try
                 {
                     foreach (var line in File.ReadAllLines(classFile))
                     {
                         string value = line?.Trim();
-                        if (!string.IsNullOrWhiteSpace(value))
+                        if (!string.IsNullOrWhiteSpace(value) && classNameSet.Add(value))
                         {
                             classNames.Add(value);
                         }
@@ -581,6 +679,8 @@ namespace AudioTraining
                 .Where(s => !s.Contains(Path.DirectorySeparatorChar + "Dataset_Prepared" + Path.DirectorySeparatorChar))
                 .ToList();
 
+            // 文件名 flatten 冲突修复：相对路径做短 hash，追加到文件名，避免不同目录同名图互相覆盖
+            var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var imagePath in imageFiles)
             {
                 string labelPath = Path.ChangeExtension(imagePath, ".txt");
@@ -591,7 +691,25 @@ namespace AudioTraining
 
                 string relative = imagePath.Substring(sourceFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Length)
                     .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                string flatName = relative.Replace(Path.DirectorySeparatorChar, '_').Replace(Path.AltDirectorySeparatorChar, '_');
+                string flatBase = relative.Replace(Path.DirectorySeparatorChar, '_').Replace(Path.AltDirectorySeparatorChar, '_');
+                string ext = Path.GetExtension(flatBase);
+                string nameNoExt = Path.GetFileNameWithoutExtension(flatBase);
+                // 用相对路径算短 hash，保证相同原路径哈希稳定；不同路径哈希不同
+                string shortHash = ComputeShortPathHash(relative);
+                string flatName = $"{nameNoExt}__{shortHash}{ext}";
+
+                // 极端防御：万一 hash 仍然撞车（比如两张图相对路径完全相同，不应该发生），再加计数后缀
+                if (!usedNames.Add(flatName))
+                {
+                    int counter = 1;
+                    string probe;
+                    do
+                    {
+                        probe = $"{nameNoExt}__{shortHash}_{counter}{ext}";
+                        counter++;
+                    } while (!usedNames.Add(probe));
+                    flatName = probe;
+                }
 
                 string destImgPath = Path.Combine(workspaceRoot, flatName);
                 string destLblPath = Path.ChangeExtension(destImgPath, ".txt");
@@ -599,14 +717,39 @@ namespace AudioTraining
                 File.Copy(labelPath, destLblPath, true);
             }
 
-            classesFile = Path.Combine(workspaceRoot, "classes.txt");
+            string classesFile = Path.Combine(workspaceRoot, "classes.txt");
             if (classNames.Count == 0)
             {
                 classNames.Add("defect");
             }
 
             File.WriteAllLines(classesFile, classNames, Encoding.UTF8);
-            return workspaceRoot;
+
+            // 更新缓存
+            _lastWorkspaceSourceKey = cacheKey;
+            _lastWorkspaceRoot = workspaceRoot;
+            _lastWorkspaceClassesFile = classesFile;
+
+            return new WorkspaceBuildResult
+            {
+                WorkspaceRoot = workspaceRoot,
+                ClassesFile = classesFile
+            };
+        }
+
+        /// <summary>
+        /// 相对路径短 hash（8 位 hex），用来区分不同目录下的同名图，避免 flatten 后覆盖
+        /// </summary>
+        private static string ComputeShortPathHash(string relativePath)
+        {
+            if (string.IsNullOrEmpty(relativePath)) return "00000000";
+            using (var sha = System.Security.Cryptography.SHA1.Create())
+            {
+                byte[] bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(relativePath.ToLowerInvariant()));
+                var sb = new StringBuilder(8);
+                for (int i = 0; i < 4; i++) sb.Append(bytes[i].ToString("x2"));
+                return sb.ToString();
+            }
         }
 
         private sealed class AutoAnnotationResult
@@ -865,16 +1008,30 @@ namespace AudioTraining
                 pythonPath = "python"; 
             }
 
+            // ★ 在进入 try 之前把 UI 读起来，后续 Task.Run 里不再访问 UI 控件
+            bool fastDatasetMode = chkFastDatasetMode.Checked;
+
             try
             {
-                // 1. Validate X-AnyLabeling annotations
-                string workspaceRoot = BuildIncrementalTrainingWorkspace(_currentImageFolder, out string classesFile);
-                //float valSplit = (float)numValSplit.Value;
-                
+                // ★ 这里是 UI 卡死的元凶：500 张图 × 2 次 File.Copy 全在主线程跑。
+                //   改成 Task.Run 到后台，UI 不再冻结。
+                AppendConsole(fastDatasetMode
+                    ? "[快速模式] 跳过 flatten，直接使用源目录..."
+                    : "正在构建训练工作区 (flatten 子目录 + 合并 classes.txt)...");
+                btnStartTrain.Enabled = false;
+                Application.DoEvents(); // 让 UI 先把 disabled 状态画出来
+
+                var buildResult = await Task.Run(() => fastDatasetMode
+                    ? BuildFastDatasetWorkspace(_currentImageFolder)
+                    : BuildIncrementalTrainingWorkspace(_currentImageFolder));
+                string workspaceRoot = buildResult.WorkspaceRoot;
+                string classesFile = buildResult.ClassesFile;
+
                 // Check if classes.txt exists (required by X-AnyLabeling)
                 if (!File.Exists(classesFile))
                 {
                     MessageBox.Show($"未找到 classes.txt 文件！\n\n请确保使用 X-AnyLabeling 标注工具，并已导出标注数据。\n路径: {classesFile}");
+                    btnStartTrain.Enabled = true;
                     return;
                 }
 
@@ -886,6 +1043,7 @@ namespace AudioTraining
                 if (imageFiles.Count == 0)
                 {
                     MessageBox.Show("未找到图片文件！请检查数据文件夹。");
+                    btnStartTrain.Enabled = true;
                     return;
                 }
 
@@ -906,6 +1064,7 @@ namespace AudioTraining
                 if (txtCount == 0)
                 {
                     MessageBox.Show($"未找到任何标注文件(.txt)！\n\n请使用 X-AnyLabeling 标注工具完成标注并导出。");
+                    btnStartTrain.Enabled = true;
                     return;
                 }
 
@@ -920,6 +1079,7 @@ namespace AudioTraining
                     
                     if (result == DialogResult.No)
                     {
+                        btnStartTrain.Enabled = true;
                         return;
                     }
                 }
@@ -929,6 +1089,7 @@ namespace AudioTraining
             catch (Exception ex)
             {
                 MessageBox.Show($"标注数据验证失败: {ex.Message}");
+                btnStartTrain.Enabled = true;
                 return;
             }
 
@@ -937,10 +1098,19 @@ namespace AudioTraining
             try
             {
                 AppendConsole("正在整理数据集目录结构 (Train/Val Split)...");
-                // Use DatasetManager to create Dataset_Prepared folder
-                string workspaceRoot = BuildIncrementalTrainingWorkspace(_currentImageFolder, out string classesFile);
+                // 缓存命中时这次调用是瞬间返回的；第一次没命中则也扔后台避免再卡一次
+                var buildResult = await Task.Run(() => fastDatasetMode
+                    ? BuildFastDatasetWorkspace(_currentImageFolder)
+                    : BuildIncrementalTrainingWorkspace(_currentImageFolder));
+                string workspaceRoot = buildResult.WorkspaceRoot;
+                string classesFile = buildResult.ClassesFile;
                 float valSplit1 = (float)numValSplit.Value;
-                datasetRoot = await Task.Run(() => DatasetManager.PrepareDataset(workspaceRoot, classesFile, valSplit1));
+                // 快速模式下显式指定 Dataset_Prepared 放在用户数据根目录下，
+                // 避免默认行为把它写到 sourceFolder 的父目录（导致用户父目录被污染）
+                string datasetOutputRoot = fastDatasetMode
+                    ? Path.Combine(_currentImageFolder, "Dataset_Prepared")
+                    : null;
+                datasetRoot = await Task.Run(() => DatasetManager.PrepareDataset(workspaceRoot, classesFile, valSplit1, datasetOutputRoot));
                 yamlPath = Path.Combine(datasetRoot, "data.yaml");
                 AppendConsole($"数据集整理完成: {datasetRoot}");
                 AppendConsole($"配置文件生成: {yamlPath}");
@@ -950,6 +1120,7 @@ namespace AudioTraining
             catch (Exception ex)
             {
                 MessageBox.Show($"数据集整理失败: {ex.Message}");
+                btnStartTrain.Enabled = true;
                 return;
             }
 
@@ -980,12 +1151,14 @@ namespace AudioTraining
                 if (string.IsNullOrWhiteSpace(baseModelPath))
                 {
                     MessageBox.Show("请先选择已有的 .pt 模型文件！");
+                    btnStartTrain.Enabled = true;
                     return;
                 }
 
                 if (!File.Exists(baseModelPath))
                 {
                     MessageBox.Show($"基础模型不存在：\n{baseModelPath}");
+                    btnStartTrain.Enabled = true;
                     return;
                 }
                 
@@ -994,8 +1167,11 @@ namespace AudioTraining
                 {
                     try
                     {
-                        string workspaceRoot = BuildIncrementalTrainingWorkspace(_currentImageFolder, out string classesFile);
-                        string[] newClasses = _incrementalClassMapper.ReadClassesFromFile(classesFile);
+                        // 此处 99% 会命中缓存（上面已经 build 过），瞬间返回；万一没命中也扔后台
+                        var buildResult = await Task.Run(() => fastDatasetMode
+                            ? BuildFastDatasetWorkspace(_currentImageFolder)
+                            : BuildIncrementalTrainingWorkspace(_currentImageFolder));
+                        string[] newClasses = _incrementalClassMapper.ReadClassesFromFile(buildResult.ClassesFile);
                         
                         // 注意：无法直接从.pt读取类别，这里简化处理，由Python脚本验证
                         // 实际验证会在train_incremental.py中进行
@@ -1006,6 +1182,7 @@ namespace AudioTraining
                     catch (Exception ex)
                     {
                         MessageBox.Show($"读取类别信息失败: {ex.Message}");
+                        btnStartTrain.Enabled = true;
                         return;
                     }
                 }
@@ -1053,9 +1230,13 @@ namespace AudioTraining
 
         private void OnTrainingOutputReceived(object sender, TrainingEventArgs e)
         {
+            // 用 BeginInvoke：Python 输出频繁时（比如每个 batch 打一行）同步 Invoke 会把后台回调线程卡在 UI 队列上，
+            // 反过来拖慢 STDOUT 读取速度，进而导致输出丢帧或进程卡死。BeginInvoke 异步派发不阻塞后台线程。
             if (InvokeRequired)
             {
-                Invoke(new Action(() => OnTrainingOutputReceived(sender, e)));
+                try { BeginInvoke(new Action(() => OnTrainingOutputReceived(sender, e))); }
+                catch (InvalidOperationException) { /* 窗体正在关闭时忽略 */ }
+                //catch (ObjectDisposedException) { /* 窗体已释放 */ }
                 return;
             }
 

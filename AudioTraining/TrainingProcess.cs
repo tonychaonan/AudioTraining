@@ -33,8 +33,25 @@ namespace AudioTraining
         
         private StringBuilder _errorBuffer;
 
+        /// <summary>
+        /// 把字符串参数包成命令行安全的 "..." 形式（内含 " 的话会被 \" 转义）
+        /// </summary>
+        private static string Quote(string s)
+        {
+            if (s == null) return "\"\"";
+            return "\"" + s.Replace("\"", "\\\"") + "\"";
+        }
+
         public async Task StartTrainingAsync(string dataYamlPath, string modelSize, int epochs, int batchSize, string projectPath, string pythonPath, bool useOBB = false, int seed = 0, string baseModelPath = null, int imgSize = 640, double lr0 = 0.001, int patience = 30, bool useMosaic = false, bool useMixup = false)
         {
+            // 并发启动保护：上一次训练还在跑就拒绝再开一个
+            if (IsRunning)
+            {
+                OnOutput("已有训练进程在运行，忽略本次启动请求。");
+                LoggerService.Warn($"[Training] StartTrainingAsync ignored: previous process still running (PID: {_process?.Id}).");
+                return;
+            }
+
             _errorBuffer = new StringBuilder();
             ExitCode = 0;
             OnnxModelPath = null;
@@ -49,16 +66,27 @@ namespace AudioTraining
 
             string pythonExe = string.IsNullOrWhiteSpace(pythonPath) ? "python" : pythonPath;
 
-            // Arguments: <yaml_path> <epochs> <img_size> <model_type> <device> <model_size> <batch_size> [seed] [base_model_path] [lr0] [patience] [mosaic] [mixup]
             string modelType = useOBB ? "obb" : "detect";
             string device = "0";
-            
-            // Build arguments with required parameters
             string normalizedModelSize = string.IsNullOrWhiteSpace(modelSize) ? "n" : modelSize.Trim().ToLowerInvariant();
-            string args = $"\"{scriptPath}\" \"{dataYamlPath}\" {epochs} {imgSize} {modelType} {device} {normalizedModelSize} {batchSize}";
-            args += $" {seed}";
-            args += $" \"{baseModelPath ?? string.Empty}\"";
-            args += $" {lr0.ToString(CultureInfo.InvariantCulture)} {patience} {(useMosaic ? 1 : 0)} {(useMixup ? 1 : 0)}";
+
+            // 命名参数（argparse）拼接：位置不再重要，新增参数不会错位
+            var sb = new StringBuilder();
+            sb.Append(Quote(scriptPath));
+            sb.Append(" --data ").Append(Quote(dataYamlPath));
+            sb.Append(" --epochs ").Append(epochs.ToString(CultureInfo.InvariantCulture));
+            sb.Append(" --img-size ").Append(imgSize.ToString(CultureInfo.InvariantCulture));
+            sb.Append(" --model-type ").Append(modelType);
+            sb.Append(" --device ").Append(device);
+            sb.Append(" --model-size ").Append(normalizedModelSize);
+            sb.Append(" --batch-size ").Append(batchSize.ToString(CultureInfo.InvariantCulture));
+            sb.Append(" --seed ").Append(seed.ToString(CultureInfo.InvariantCulture));
+            sb.Append(" --base-model ").Append(Quote(baseModelPath ?? string.Empty));
+            sb.Append(" --lr0 ").Append(lr0.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(" --patience ").Append(patience.ToString(CultureInfo.InvariantCulture));
+            sb.Append(" --mosaic ").Append(useMosaic ? "1" : "0");
+            sb.Append(" --mixup ").Append(useMixup ? "1" : "0");
+            string args = sb.ToString();
 
             if (seed > 0)
             {
@@ -127,6 +155,7 @@ namespace AudioTraining
             catch (Exception ex)
             {
                 OnOutput($"Error starting python process: {ex.Message}. Make sure 'python' is installed and in PATH.");
+                LoggerService.Error(ex, "[Training] Failed to start python process");
             }
         }
 
@@ -183,6 +212,14 @@ namespace AudioTraining
             string projectPath, string pythonPath, bool useOBB, string baseModelPath, int freezeLayers, int seed = 0,
             int imgSize = 640, double lr0 = 0.001, int patience = 30, bool useMosaic = false, bool useMixup = false)
         {
+            // 并发启动保护
+            if (IsRunning)
+            {
+                OnOutput("已有训练进程在运行，忽略本次启动请求。");
+                LoggerService.Warn($"[IncrementalTraining] StartIncrementalTrainingAsync ignored: previous process still running (PID: {_process?.Id}).");
+                return;
+            }
+
             _errorBuffer = new StringBuilder();
             ExitCode = 0;
             OnnxModelPath = null;
@@ -198,12 +235,28 @@ namespace AudioTraining
 
             string pythonExe = string.IsNullOrWhiteSpace(pythonPath) ? "python" : pythonPath;
 
-            // Arguments: <yaml_path> <epochs> <img_size> <model_type> <device> <model_size> <batch_size> <base_model_path> <freeze_layers> [seed] [lr0] [patience] [mosaic] [mixup]
             string modelType = useOBB ? "obb" : "detect";
             string device = "0";
             string normalizedModelSize = string.IsNullOrWhiteSpace(modelSize) ? "n" : modelSize.Trim().ToLowerInvariant();
-            
-            string args = $"\"{scriptPath}\" \"{dataYamlPath}\" {epochs} {imgSize} {modelType} {device} {normalizedModelSize} {batchSize} \"{baseModelPath ?? string.Empty}\" {freezeLayers} {seed} {lr0.ToString(CultureInfo.InvariantCulture)} {patience} {(useMosaic ? 1 : 0)} {(useMixup ? 1 : 0)}";
+
+            // 命名参数（argparse）拼接
+            var sb = new StringBuilder();
+            sb.Append(Quote(scriptPath));
+            sb.Append(" --data ").Append(Quote(dataYamlPath));
+            sb.Append(" --epochs ").Append(epochs.ToString(CultureInfo.InvariantCulture));
+            sb.Append(" --img-size ").Append(imgSize.ToString(CultureInfo.InvariantCulture));
+            sb.Append(" --model-type ").Append(modelType);
+            sb.Append(" --device ").Append(device);
+            sb.Append(" --model-size ").Append(normalizedModelSize);
+            sb.Append(" --batch-size ").Append(batchSize.ToString(CultureInfo.InvariantCulture));
+            sb.Append(" --base-model ").Append(Quote(baseModelPath ?? string.Empty));
+            sb.Append(" --freeze ").Append(freezeLayers.ToString(CultureInfo.InvariantCulture));
+            sb.Append(" --seed ").Append(seed.ToString(CultureInfo.InvariantCulture));
+            sb.Append(" --lr0 ").Append(lr0.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(" --patience ").Append(patience.ToString(CultureInfo.InvariantCulture));
+            sb.Append(" --mosaic ").Append(useMosaic ? "1" : "0");
+            sb.Append(" --mixup ").Append(useMixup ? "1" : "0");
+            string args = sb.ToString();
 
             if (seed > 0)
             {
@@ -270,6 +323,7 @@ namespace AudioTraining
             catch (Exception ex)
             {
                 OnOutput($"Error starting python process: {ex.Message}. Make sure 'python' is installed and in PATH.");
+                LoggerService.Error(ex, "[IncrementalTraining] Failed to start python process");
             }
         }
 
@@ -286,6 +340,8 @@ namespace AudioTraining
             }
             catch (Exception ex)
             {
+                // 不吞异常：Kill 失败通常意味着进程提前退出或权限不足，至少要打 Log
+                LoggerService.Warn($"[Training] Stop failed: {ex.Message}");
             }
         }
     }
