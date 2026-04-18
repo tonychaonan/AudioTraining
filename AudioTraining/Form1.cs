@@ -561,6 +561,78 @@ namespace AudioTraining
         }
 
         /// <summary>
+        /// 训练前做类别分布检查：打印每类别样本数；发现稀有/不平衡/总量过少时弹窗让用户确认。
+        /// 返回 true=可继续，false=用户取消。
+        /// </summary>
+        private async Task<bool> CheckDatasetBalanceAndWarnAsync(string workspaceRoot, string classesFile)
+        {
+            // 扫所有 label 文件做统计，放后台跑避免卡 UI
+            var counts = await Task.Run(() => DatasetManager.ComputeClassImageCounts(workspaceRoot));
+            var classNames = _incrementalClassMapper.ReadClassesFromFile(classesFile);
+
+            if (counts.Count == 0)
+            {
+                AppendConsole("[数据分布] 未检测到任何标注，训练几乎不会有效果。");
+                return MessageBox.Show(
+                    "未检测到任何标注内容。\n\n是否仍要继续训练？",
+                    "标注为空",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine("[数据分布] 每类别样本数（含该类别的图片数）:");
+            int minCount = int.MaxValue, maxCount = 0;
+            int totalImgs = counts.Values.Sum();
+            var rareClasses = new List<string>();
+            foreach (var kv in counts.OrderBy(x => x.Key))
+            {
+                string name = (kv.Key >= 0 && kv.Key < classNames.Length) ? classNames[kv.Key] : $"class_{kv.Key}";
+                sb.AppendLine($"    [{kv.Key}] {name}: {kv.Value} 张");
+                if (kv.Value < minCount) minCount = kv.Value;
+                if (kv.Value > maxCount) maxCount = kv.Value;
+                if (kv.Value < 10) rareClasses.Add($"{name}({kv.Value})");
+            }
+            AppendConsole(sb.ToString().TrimEnd());
+
+            // 增量模式下额外检查：如果用户没标注任何旧类别（只有新类别），给强警告
+            if (_isIncrementalMode)
+            {
+                // 说明：C# 端无法直接读取 base .pt 的 names，这里用启发式：
+                // 假设 classes.txt 前 N 项是"老类别"是不成立的（我们不知道 N）。
+                // 所以只做"是否所有类别都有样本"的提醒，具体旧/新比例由 Python 端打印。
+                for (int i = 0; i < classNames.Length; i++)
+                {
+                    if (!counts.ContainsKey(i) || counts[i] == 0)
+                    {
+                        AppendConsole($"[数据分布] ⚠ 类别 [{i}] {classNames[i]} 在本次训练数据里 0 张。" +
+                                      $"增量模式下该类别的识别能力会被后续训练冲掉（灾难性遗忘）。");
+                    }
+                }
+            }
+
+            // 汇总风险清单
+            var warns = new List<string>();
+            if (rareClasses.Count > 0)
+                warns.Add($"• 稀有类别（< 10 张）: {string.Join(", ", rareClasses)}\n" +
+                          $"  这些类别样本严重不足，mAP 方差极大，训练后很可能无法稳定识别。");
+            if (maxCount > 0 && minCount > 0 && maxCount / (double)minCount > 10)
+                warns.Add($"• 类别分布严重不平衡：最多 {maxCount} 张 vs 最少 {minCount} 张（约 {maxCount / minCount}:1）\n" +
+                          $"  模型会倾向预测大类，小类 recall 偏低。建议对小类做数据增强或补充样本。");
+            if (totalImgs < 50)
+                warns.Add($"• 总标注数过少（{totalImgs}）。建议每类 ≥ 100 张，总量 ≥ 500 张。");
+
+            if (warns.Count == 0) return true;
+
+            string msg = "检测到以下数据集风险：\n\n" + string.Join("\n\n", warns)
+                         + "\n\n是否仍要继续训练？\n（点\"否\"可退出训练，补齐数据再来）";
+            var result = MessageBox.Show(msg, "数据集风险提示",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+            return result == DialogResult.Yes;
+        }
+
+        /// <summary>
         /// ★ 快速路径：用户数据已经是"单层目录"时走这里，完全跳过 flatten/Copy。
         /// 直接返回 sourceFolder 当 workspaceRoot，classes.txt 也读用户目录下的那份。
         /// 对 500 张图来说从 "几十秒 File.Copy" 降到 "几毫秒"。
@@ -955,31 +1027,68 @@ namespace AudioTraining
         }
         
         /// <summary>
-        /// 【需求3】增量学习模式复选框事件
+        /// 【需求3】增量学习模式复选框事件。
+        /// 勾选时会自动把训练参数调到"保护旧特征"的推荐值（lr0↓ / patience↓ / mosaic关 / mixup关）。
         /// </summary>
         private void ChkEnableIncrementalMode_CheckedChanged(object sender, EventArgs e)
         {
             _isIncrementalMode = chkEnableIncrementalMode.Checked;
             numFreezeLayers.Enabled = _isIncrementalMode;
-            
-            if (_isIncrementalMode)
+
+            if (!_isIncrementalMode) return;
+
+            // ★ 勾选增量 → 自动联动勾选"从已有模型继续训练"，
+            //   因为代码 btnStartTrain_Click 里要求这俩都勾才走 StartIncrementalTrainingAsync
+            if (!chkContinueTrain.Checked)
             {
-                MessageBox.Show(
-                    "增量学习模式说明：\n\n" +
-                    "1. 新数据集的类别列表必须以旧类别开头（顺序一致）\n" +
-                    "2. 可以在末尾添加新类别，例如：\n" +
-                    "   旧模型: [A, B, C]\n" +
-                    "   新数据: [A, B, C, D, E] ✓ 正确\n" +
-                    "   新数据: [B, C, D] ✗ 错误（顺序不匹配）\n\n" +
-                    "3. 冻结层数建议：\n" +
-                    "   - 0层 = 全模型训练（类似普通训练）\n" +
-                    "   - 10层 = 冻结前10层（推荐，平衡速度和效果）\n" +
-                    "   - -1层 = 冻结整个backbone（仅训练检测头）",
-                    "增量学习模式",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information
-                );
+                chkContinueTrain.Checked = true;
             }
+
+            // ★ 一键应用增量训练推荐参数，防止旧特征被冲掉
+            //   - lr0=0.001：比标准训练默认 0.01 低 10×，避免大步长抹掉已学权重
+            //   - patience=20：更短耐心，小数据增量不需要长尾训练
+            //   - mosaic/mixup 关闭：混合增强会让模型把"新旧特征混在一起学"，反而不利于类别边界
+            decimal oldLr = numLearningRate.Value;
+            decimal oldPatience = numPatience.Value;
+            bool oldMosaic = chkMosaic.Checked;
+            bool oldMixup = chkMixup.Checked;
+
+            if (numLearningRate.Value > 0.002m) numLearningRate.Value = 0.001m;
+            if (numPatience.Value > 20) numPatience.Value = 20;
+            chkMosaic.Checked = false;
+            chkMixup.Checked = false;
+
+            var sb = new StringBuilder();
+            sb.AppendLine("[增量推荐参数已应用]");
+            if (oldLr != numLearningRate.Value) sb.AppendLine($"  lr0: {oldLr} → {numLearningRate.Value}");
+            if (oldPatience != numPatience.Value) sb.AppendLine($"  patience: {oldPatience} → {numPatience.Value}");
+            if (oldMosaic != chkMosaic.Checked) sb.AppendLine("  Mosaic: 已关闭");
+            if (oldMixup != chkMixup.Checked) sb.AppendLine("  MixUp: 已关闭");
+            if (sb.Length > "[增量推荐参数已应用]\n".Length)
+            {
+                AppendConsole(sb.ToString().TrimEnd());
+            }
+
+            MessageBox.Show(
+                "增量学习模式说明：\n\n" +
+                "1. 新数据集的类别列表必须以旧类别开头（顺序一致）\n" +
+                "   旧模型: [A, B, C]\n" +
+                "   新数据: [A, B, C, D, E] ✓ 正确\n" +
+                "   新数据: [B, C, D]       ✗ 错误（顺序不匹配）\n\n" +
+                "2. 冻结层数建议：\n" +
+                "   - 0层  = 全模型训练（可能冲掉旧特征，不推荐）\n" +
+                "   - 10层 = 冻结前10层（推荐，平衡速度和效果）\n" +
+                "   - -1层 = 冻结整个backbone（仅训练检测头，最保守）\n\n" +
+                "3. 为保护旧特征，已自动调整：\n" +
+                "   - 学习率 lr0 → 0.001（原始 0.01 会快速抹掉旧权重）\n" +
+                "   - patience → 20\n" +
+                "   - Mosaic / MixUp → 关闭\n\n" +
+                "4. ⚠ 避免灾难性遗忘的关键：\n" +
+                "   训练数据里必须包含足够的旧类别样本（建议 旧:新 ≥ 2:1）",
+                "增量学习模式",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information
+            );
         }
 
         private void btnBrowseBaseModel_Click(object sender, EventArgs e)
@@ -1085,6 +1194,15 @@ namespace AudioTraining
                 }
 
                 AppendConsole("X-AnyLabeling 标注数据验证通过，准备训练...");
+
+                // ★ 新增：训练前类别分布检查（稀有类 / 不平衡 / 数据量过少），让用户决定是否继续
+                bool okToContinue = await CheckDatasetBalanceAndWarnAsync(workspaceRoot, classesFile);
+                if (!okToContinue)
+                {
+                    AppendConsole("用户在数据风险提示处取消训练。");
+                    btnStartTrain.Enabled = true;
+                    return;
+                }
             }
             catch (Exception ex)
             {

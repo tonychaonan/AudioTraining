@@ -12,6 +12,11 @@ import torch
 import yaml
 from ultralytics import YOLO
 
+# 共享 helper：head surgery + 逐类 metrics 打印
+# train_helpers.py 和本文件同目录，由 C# 部署时 PreserveNewest 复制到 bin/Scripts/
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from train_helpers import extend_detection_head_for_incremental, evaluate_and_print_metrics
+
 
 def set_seed(seed):
     """设置所有随机种子以确保训练可重复性"""
@@ -141,7 +146,11 @@ def main():
     project_path = os.path.join(os.getcwd(), 'train_output')
     exp_name = 'incremental_exp'
 
-    # 构建训练参数（增量学习建议更小的学习率 + lrf 平滑衰减）
+    # 构建训练参数
+    # ★ 增量训练关键策略（防止旧特征遗忘 + 平滑学习新类）：
+    #   - cos_lr=True：余弦退火，后期 lr 平滑趋零，比 linear decay 对已收敛权重友好
+    #   - warmup_epochs=1.0：模型已预训练，不需要长 warmup；过长的 warmup 会浪费有效 epoch
+    #   - lrf=0.01：最终 lr = lr0 * 0.01，给收尾阶段足够小的步长保护旧权重
     train_params = {
         'data': args.data,
         'epochs': args.epochs,
@@ -154,9 +163,12 @@ def main():
         'workers': 0,
         'lr0': args.lr0,
         'lrf': 0.01,
+        'cos_lr': True,
+        'warmup_epochs': 1.0,
         'patience': args.patience,
         'mosaic': args.mosaic,
         'mixup': args.mixup,
+        'plots': True,
     }
     if args.seed > 0:
         train_params['seed'] = args.seed
@@ -168,13 +180,37 @@ def main():
         train_params['freeze'] = 10 if args.freeze == -1 else args.freeze
         print(f"--- Applying Ultralytics freeze={train_params['freeze']} ---")
 
+    # ★ 类别扩展处理：尝试 head surgery 保留旧类别权重
+    #   Ultralytics 默认在 new_nc != old_nc 时会重建 Detect head，旧 cls head 权重全部丢失（"假增量"）
+    #   我们在 train() 之前手动扩 head：前 old_nc 个通道原样保留，新通道小随机初始化，
+    #   这样 trainer 看到 model.nc == data.nc 就不会再重建，旧权重得以保留
+    if len(old_classes) > 0 and len(new_classes) > len(old_classes):
+        added = len(new_classes) - len(old_classes)
+        print(f"--- 检测到类别扩展：{len(old_classes)} → {len(new_classes)} (+{added}) ---")
+
+        surgery_ok = extend_detection_head_for_incremental(
+            model, old_nc=len(old_classes), new_nc=len(new_classes))
+
+        if not surgery_ok:
+            # fallback：让 Ultralytics 自己处理，但旧权重会丢，必须给强警告
+            print(f"--- [警告] Head surgery 未成功，Ultralytics 将自动重建 detection head ---", file=sys.stderr)
+            print(f"--- [警告] 旧 {len(old_classes)} 个类别的 head 权重会被重置为随机值（仅保留 backbone 特征） ---", file=sys.stderr)
+            print(f"--- [警告] 当前 lr0={args.lr0}。类别扩展场景建议 lr0≤0.0005 并确保旧类别样本占比 ≥ 50% ---", file=sys.stderr)
+            if args.lr0 > 0.0015:
+                print(f"--- [警告] lr0={args.lr0} 偏高，旧类别可能被冲掉。强烈建议降到 0.0005 ---", file=sys.stderr)
+
     model.train(**train_params)
 
     print("--- Incremental training finished ---")
-    print("--- Exporting to ONNX ---")
 
     best_pt_path = os.path.join(project_path, exp_name, 'weights', 'best.pt')
     if os.path.exists(best_pt_path):
+        # ★ 训练后逐类 metrics 评估：让用户直观看到"旧类别是否退化、新类别是否学会"
+        #   任何异常都吞掉（不影响训练结果和 ONNX 导出）
+        evaluate_and_print_metrics(best_pt_path, args.data, args.img_size,
+                                   title="Incremental Training - Per-Class Metrics")
+
+        print("--- Exporting to ONNX ---")
         best_model = YOLO(best_pt_path)
         # ★ 关键修复：导出时必须传 imgsz，否则默认按 640 导出，C# 端按训练尺寸跑会不一致
         success = best_model.export(format='onnx', dynamic=False, imgsz=args.img_size)

@@ -148,6 +148,12 @@
     <None Include="Scripts\train_wrapper.py">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="Scripts\train_incremental.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Scripts\train_helpers.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="Scripts\inference_wrapper.py">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

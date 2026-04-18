@@ -11,6 +11,10 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 
+# 共享 helper（逐类 metrics 打印）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from train_helpers import evaluate_and_print_metrics
+
 
 def set_seed(seed):
     """设置所有随机种子以确保训练可重复性"""
@@ -81,6 +85,8 @@ def main():
     project_path = os.path.join(os.getcwd(), 'train_output')
     exp_name = 'current_exp'
 
+    # cos_lr + warmup_epochs：标准训练下也是更稳的配置
+    # continue-train 场景（use_base=True）更是必须，防止高 lr 冲掉已有特征
     train_params = {
         'data': args.data,
         'epochs': args.epochs,
@@ -92,9 +98,13 @@ def main():
         'exist_ok': True,
         'workers': 0,
         'lr0': args.lr0,
+        'lrf': 0.01,
+        'cos_lr': True,
+        'warmup_epochs': 1.0 if use_base else 3.0,  # continue 训练：短 warmup；全新训练：标准 warmup
         'patience': args.patience,
         'mosaic': args.mosaic,
         'mixup': args.mixup,
+        'plots': True,
     }
     if args.seed > 0:
         train_params['seed'] = args.seed
@@ -105,10 +115,15 @@ def main():
     model.train(**train_params)
 
     print("--- Python Engine: Training Finished ---")
-    print("--- Python Engine: Exporting to ONNX ---")
 
     best_pt_path = os.path.join(project_path, exp_name, 'weights', 'best.pt')
     if os.path.exists(best_pt_path):
+        # ★ 训练后逐类 metrics：让用户看到每个类别的 P/R/mAP，尤其是 continue-train 场景
+        #   可以对比上一版模型的旧类别是否掉了
+        title = "Continue-Train - Per-Class Metrics" if use_base else "Standard Training - Per-Class Metrics"
+        evaluate_and_print_metrics(best_pt_path, args.data, args.img_size, title=title)
+
+        print("--- Python Engine: Exporting to ONNX ---")
         best_model = YOLO(best_pt_path)
         # ★ 关键修复：导出时必须传 imgsz，否则默认按 640 导出，C# 端按训练尺寸跑会不一致
         success = best_model.export(format='onnx', dynamic=False, imgsz=args.img_size)

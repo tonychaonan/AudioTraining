@@ -53,31 +53,9 @@ namespace AudioTraining.Services
             string valFixedPath = Path.Combine(metaDir, "val_fixed.txt");
             var valSet = LoadValFixedSet(valFixedPath);
 
-            var rng = new Random();
-            var valList = new List<string>();
-            var trainList = new List<string>();
-
-            foreach (var img in imageFiles)
-            {
-                string name = Path.GetFileName(img);
-                if (valSet.Contains(name))
-                {
-                    valList.Add(img);
-                }
-                else
-                {
-                    // 新文件按 valSplit 概率划入 val，固化到 valSet
-                    if (rng.NextDouble() < valSplit)
-                    {
-                        valList.Add(img);
-                        valSet.Add(name);
-                    }
-                    else
-                    {
-                        trainList.Add(img);
-                    }
-                }
-            }
+            // ★ 分层 val split：对每个类别**独立**按 valSplit 比例抽 val，
+            // 保证稀有/新类别在 val 集里必有代表样本（修复原"纯随机分导致新类 val=0"的问题）
+            var (trainList, valList) = ComputeStratifiedSplit(imageFiles, sourceFolder, valSet, valSplit);
 
             // 边界：整个数据集只有 1 张图 —— 两边都放一份
             if (imageFiles.Count == 1)
@@ -87,10 +65,9 @@ namespace AudioTraining.Services
             }
             else
             {
-                // 边界：首次运行 + 新数据量少导致 val 空了，强制挑一张塞 val
+                // 边界：val 空了（全是全新数据且 stratified 无命中）—— 强制挑一张塞 val
                 if (valList.Count == 0 && trainList.Count > 1)
                 {
-                    // 挑最后一张（避免总是挑第一张造成偏差）
                     var moved = trainList[trainList.Count - 1];
                     trainList.RemoveAt(trainList.Count - 1);
                     valList.Add(moved);
@@ -112,11 +89,144 @@ namespace AudioTraining.Services
             }
 
             // 持久化 val 集（只保存当前真正存在于数据集里的文件，把已删除的历史条目清掉）
+            var finalValNames = valList.Select(Path.GetFileName).ToList();
+            foreach (var n in finalValNames) valSet.Add(n);
             SaveValFixedSet(valFixedPath, valSet.Intersect(imageFiles.Select(Path.GetFileName)));
 
             GenerateDataYaml(datasetRoot, classesFile);
 
             return datasetRoot;
+        }
+
+        /// <summary>
+        /// 分层 train/val 划分：对每个"主类别"分组后独立按 valSplit 比例抽 val。
+        ///
+        /// 主类别定义：一张图含多个类别时，选其中"覆盖最少"的类别作为主类——这样稀有类优先占坑，
+        /// 保证它们在 val 集里必有代表（普通随机抽样时稀有类可能一张不进 val）。
+        ///
+        /// val_fixed.txt 里已固定的图**永远**保留在 val 集，跨训练次结果可对比。
+        /// </summary>
+        private static (List<string> trainList, List<string> valList) ComputeStratifiedSplit(
+            List<string> imageFiles, string sourceFolder, HashSet<string> valSet, float valSplit)
+        {
+            var rng = new Random();
+
+            // 1) 读每张图的类别集合
+            var imageToClasses = new Dictionary<string, HashSet<int>>();
+            foreach (var img in imageFiles)
+            {
+                var lbl = Path.Combine(sourceFolder, Path.GetFileNameWithoutExtension(img) + ".txt");
+                imageToClasses[img] = ReadClassIdsFromLabel(lbl);
+            }
+
+            // 2) 类别覆盖度统计：多少张图含该类
+            var classCoverage = new Dictionary<int, int>();
+            foreach (var kv in imageToClasses)
+                foreach (var c in kv.Value)
+                {
+                    classCoverage.TryGetValue(c, out int n);
+                    classCoverage[c] = n + 1;
+                }
+
+            // 3) 每张图选主类：取它含的类别里"覆盖度最低"那个（稀有优先），
+            //    没标注的图用 -1 归到独立桶走随机
+            var primaryClass = new Dictionary<string, int>();
+            foreach (var kv in imageToClasses)
+            {
+                if (kv.Value.Count == 0)
+                {
+                    primaryClass[kv.Key] = -1;
+                }
+                else
+                {
+                    int rarestClass = kv.Value.OrderBy(c => classCoverage[c]).First();
+                    primaryClass[kv.Key] = rarestClass;
+                }
+            }
+
+            // 4) 按主类分桶，每桶独立分层抽样
+            var buckets = primaryClass.GroupBy(kv => kv.Value)
+                                      .ToDictionary(g => g.Key, g => g.Select(x => x.Key).ToList());
+
+            var trainList = new List<string>();
+            var valList = new List<string>();
+
+            foreach (var bucket in buckets)
+            {
+                var imgsInBucket = bucket.Value;
+
+                // 已经在 val_fixed 里的强制进 val
+                var fixedVal = imgsInBucket.Where(p => valSet.Contains(Path.GetFileName(p))).ToList();
+                var free = imgsInBucket.Where(p => !valSet.Contains(Path.GetFileName(p)))
+                                        .OrderBy(_ => rng.Next()).ToList();
+
+                // 目标 val 数：至少 1（只要桶里图 ≥ 2），保证稀有类别有 val 代表
+                int target = (int)Math.Round(imgsInBucket.Count * valSplit);
+                if (imgsInBucket.Count >= 2 && target < 1) target = 1;
+
+                int need = target - fixedVal.Count;
+                if (need > 0)
+                {
+                    var newVal = free.Take(need).ToList();
+                    valList.AddRange(fixedVal);
+                    valList.AddRange(newVal);
+                    trainList.AddRange(free.Skip(need));
+                }
+                else
+                {
+                    valList.AddRange(fixedVal);
+                    trainList.AddRange(free);
+                }
+            }
+
+            return (trainList, valList);
+        }
+
+        /// <summary>
+        /// 从 YOLO 标签文件读取出现过的 class id 集合（每行首 token 是 int class_id）。
+        /// 文件不存在或读失败返回空集。
+        /// </summary>
+        private static HashSet<int> ReadClassIdsFromLabel(string labelPath)
+        {
+            var set = new HashSet<int>();
+            if (!File.Exists(labelPath)) return set;
+            try
+            {
+                foreach (var line in File.ReadAllLines(labelPath))
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    var first = line.TrimStart().Split(new[] { ' ', '\t' }, 2, StringSplitOptions.RemoveEmptyEntries);
+                    if (first.Length == 0) continue;
+                    if (int.TryParse(first[0], out int cid)) set.Add(cid);
+                }
+            }
+            catch { }
+            return set;
+        }
+
+        /// <summary>
+        /// 统计数据集的类别分布，供 UI/训练前警告使用。
+        /// 返回：(类别ID -> 含该类别的图片数量)
+        /// 一张图若含多个类别，会在多个类别上各 +1。
+        /// </summary>
+        public static Dictionary<int, int> ComputeClassImageCounts(string sourceFolder)
+        {
+            var result = new Dictionary<int, int>();
+            if (string.IsNullOrWhiteSpace(sourceFolder) || !Directory.Exists(sourceFolder))
+                return result;
+
+            var ext = new[] { ".jpg", ".jpeg", ".png", ".bmp" };
+            foreach (var img in Directory.GetFiles(sourceFolder, "*.*")
+                     .Where(s => ext.Contains(Path.GetExtension(s).ToLower())))
+            {
+                var lbl = Path.Combine(sourceFolder, Path.GetFileNameWithoutExtension(img) + ".txt");
+                foreach (var cid in ReadClassIdsFromLabel(lbl))
+                {
+                    result.TryGetValue(cid, out int n);
+                    result[cid] = n + 1;
+                }
+            }
+            return result;
         }
 
         private static HashSet<string> LoadValFixedSet(string path)
