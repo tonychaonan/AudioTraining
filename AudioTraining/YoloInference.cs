@@ -19,10 +19,12 @@ namespace AudioTraining
     public class YoloInference : IDisposable
     {
         private InferenceSession _inferenceSession;
-        private readonly int _targetSize = 640; 
+        private int _targetSize = 640;
         private string[] _labels;
 
         public bool IsModelLoaded => _inferenceSession != null;
+
+        public int TargetSize => _targetSize;
 
         public void LoadModel(string modelPath, string[] labels = null)
         {
@@ -37,10 +39,32 @@ namespace AudioTraining
                 var options = new SessionOptions();
                 _inferenceSession = new InferenceSession(modelPath, options);
                 _labels = labels;
+
+                ResolveInputSizeFromModel();
             }
             catch (Exception ex)
             {
                 throw new Exception($"Failed to load YOLOv8 model from {modelPath}: {ex.Message}", ex);
+            }
+        }
+
+        // 从 ONNX 模型元数据动态读取输入尺寸，自动适配 640/960/等
+        private void ResolveInputSizeFromModel()
+        {
+            try
+            {
+                var inputMeta = _inferenceSession.InputMetadata.Values.First();
+                var dims = inputMeta.Dimensions;
+                // YOLO 输入维度格式: [batch, 3, H, W]
+                if (dims != null && dims.Length >= 4 && dims[2] > 0 && dims[3] > 0)
+                {
+                    _targetSize = dims[2];
+                }
+                // 否则（动态维度或异常）沿用默认 640
+            }
+            catch
+            {
+                // 解析失败沿用默认 640
             }
         }
 

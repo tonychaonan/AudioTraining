@@ -253,13 +253,18 @@ namespace AudioTraining
             string modelName = Path.GetFileNameWithoutExtension(_loadedOnnxPath);
             string onnxAbsPath = Path.GetFullPath(_loadedOnnxPath).Replace("\\", "/");
 
+            // 从已加载的模型读取真实输入尺寸（自动适配 640/960/等）
+            int inputSize = _useOBBModel
+                ? (_yoloOBBInference != null && _yoloOBBInference.IsModelLoaded ? _yoloOBBInference.TargetSize : 640)
+                : (_yoloInference != null && _yoloInference.IsModelLoaded ? _yoloInference.TargetSize : 640);
+
             var sb = new StringBuilder();
             sb.AppendLine($"type: {modelType}");
             sb.AppendLine($"name: {modelName}");
             sb.AppendLine($"display_name: {modelName}");
             sb.AppendLine($"model_path: {onnxAbsPath}");
-            sb.AppendLine("input_width: 640");
-            sb.AppendLine("input_height: 640");
+            sb.AppendLine($"input_width: {inputSize}");
+            sb.AppendLine($"input_height: {inputSize}");
             sb.AppendLine("confidence_threshold: 0.25");
             sb.AppendLine("nms_threshold: 0.45");
             sb.AppendLine("classes:");
